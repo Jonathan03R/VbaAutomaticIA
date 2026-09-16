@@ -177,6 +177,37 @@ function Copy-VbaComponent([string] $From, [string] $To, $Entry, $OldEntry) {
     }
 }
 
+function Copy-VbaEntryWithSourcePath($BookEntry, $SourceEntry) {
+    if (-not $BookEntry) { return $null }
+    $entry = @{}
+    foreach ($key in $BookEntry.Keys) { $entry[$key] = $BookEntry[$key] }
+    # Excel knows the component type, but not the user's folder architecture.
+    if ($SourceEntry) { $entry.Path = $SourceEntry.Path }
+    return $entry
+}
+
+function Copy-VbaExportToSourcePath([string] $ExportRoot, [string] $SourceRoot, $BookEntry, $SourceEntry) {
+    if (-not $BookEntry) {
+        Copy-VbaComponent $ExportRoot $SourceRoot $null $SourceEntry
+        return $null
+    }
+    $entry = Copy-VbaEntryWithSourcePath $BookEntry $SourceEntry
+    if ($SourceEntry -and $SourceEntry.Path -ine $entry.Path) {
+        Copy-VbaComponent $ExportRoot $SourceRoot $null $SourceEntry
+    }
+    $origin = Join-Path $ExportRoot $BookEntry.Path
+    $target = Join-Path $SourceRoot $entry.Path
+    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+    Copy-Item -LiteralPath $origin -Destination $target -Force
+    if ([IO.Path]::GetExtension($origin) -ieq '.frm') {
+        $originBinary = [IO.Path]::ChangeExtension($origin, '.frx')
+        $targetBinary = [IO.Path]::ChangeExtension($target, '.frx')
+        if (Test-Path -LiteralPath $originBinary) { Copy-Item -LiteralPath $originBinary -Destination $targetBinary -Force }
+        elseif (Test-Path -LiteralPath $targetBinary) { Remove-Item -LiteralPath $targetBinary -Force }
+    }
+    return $entry
+}
+
 function Import-VbaComponent($Project, [string] $Name, [string] $Root, $Entry) {
     $existing = @($Project.VBComponents) | Where-Object { $_.Name -ieq $Name } | Select-Object -First 1
     if (-not $Entry) {
@@ -374,8 +405,11 @@ function Sync-VbaProject($Connection, [string] $SourceRoot, [string] $StatePath,
         $state = Read-VbaState $StatePath
         if ($Direction -eq 'Pull') {
             $names = @(@($sourceMap.Keys) + @($bookMap.Keys) | Sort-Object -Unique)
-            foreach ($name in $names) { Copy-VbaComponent $stage $SourceRoot $bookMap[$name] $sourceMap[$name] }
-            Save-VbaState $StatePath $bookMap $bookMap
+            foreach ($name in $names) {
+                $entry = Copy-VbaExportToSourcePath $stage $SourceRoot $bookMap[$name] $sourceMap[$name]
+                if ($entry) { $sourceMap[$name] = $entry } else { $sourceMap.Remove($name) }
+            }
+            Save-VbaState $StatePath $sourceMap $bookMap
             Write-Host "Extracted $($bookMap.Count) components -> $SourceRoot" -ForegroundColor Cyan
             return
         }
@@ -436,8 +470,8 @@ function Sync-VbaProject($Connection, [string] $SourceRoot, [string] $StatePath,
             $liveHash = if ($liveMap.ContainsKey($action.Name)) { $liveMap[$action.Name].Hash } else { '' }
             $expectedHash = if ($sourceMap.ContainsKey($action.Name)) { $sourceMap[$action.Name].Hash } else { '' }
             if ($liveHash -ne $expectedHash) { throw "Source changed during export: $($action.Name). Retrying without overwriting it." }
-            Copy-VbaComponent $stage $SourceRoot $bookMap[$action.Name] $sourceMap[$action.Name]
-            if ($bookMap.ContainsKey($action.Name)) { $sourceMap[$action.Name] = $bookMap[$action.Name] }
+            $entry = Copy-VbaExportToSourcePath $stage $SourceRoot $bookMap[$action.Name] $sourceMap[$action.Name]
+            if ($entry) { $sourceMap[$action.Name] = $entry }
             else { $sourceMap.Remove($action.Name) }
             Write-Host "src <- $($action.Name)" -ForegroundColor Cyan
         }

@@ -59,6 +59,19 @@ $module = Get-Module VbaDev
             throw 'Open Excel does not contain the saved source edit.'
         }
         Write-Host 'PASS: same open Excel workbook contains the live edit'
+        $customFolder = Join-Path $source 'modules\ventas'
+        New-Item -ItemType Directory -Path $customFolder | Out-Null
+        $customFile = Join-Path $customFolder $file.Name
+        Move-Item -LiteralPath $file.FullName -Destination $customFile
+        $deadline = [DateTime]::UtcNow.AddSeconds(20)
+        do {
+            Start-Sleep -Milliseconds 300
+            $state = Read-VbaState (Join-Path $temp '.vba\state.json')
+            $architectureSaved = $state.Source[$file.BaseName].Path -eq ('modules\ventas\' + $file.Name)
+        } until ($architectureSaved -or [DateTime]::UtcNow -gt $deadline)
+        if (-not $architectureSaved) { throw 'Watcher did not retain the custom source path.' }
+        $file = Get-Item -LiteralPath $customFile
+        Write-Host 'PASS: watcher retains the custom source folder'
         $excelMarker = "' live-edit-from-Excel"
         $component.CodeModule.AddFromString($excelMarker)
         $connection.Book.Save()
@@ -68,6 +81,9 @@ $module = Get-Module VbaDev
             $exported = [IO.File]::ReadAllText($file.FullName, $script:Utf8).Contains($excelMarker)
         } until ($exported -or [DateTime]::UtcNow -gt $deadline)
         if (-not $exported) { throw ('Excel edit was not exported: ' + (Read-Log $log) + (Read-Log $errorLog)) }
+        if (-not (Test-Path -LiteralPath $customFile) -or (Test-Path -LiteralPath (Join-Path $source ('modules\' + $file.Name)))) {
+            throw 'Excel edit moved the module out of its custom source folder.'
+        }
         Write-Host 'PASS: saving an edit in the Excel editor updates the source file'
         $returnMarker = "' source-edit-after-Excel"
         Write-VbaText $file.FullName ([IO.File]::ReadAllText($file.FullName, $script:Utf8) + "`r`n$returnMarker`r`n")
