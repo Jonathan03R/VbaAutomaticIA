@@ -1,0 +1,16 @@
+*.backup-*
+*.xlsm
+*.xlsx
+*.xlsb
+.vba/
+*.xls
+*.xlam
+*.frx
+*.dll
+*.exe
+*.zip
+.env
+.env.*
+!.env.example
+/src/
+/docs/superpowers/
