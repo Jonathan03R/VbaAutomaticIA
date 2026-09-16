@@ -54,7 +54,8 @@ El punto `.` significa **la carpeta donde estás**.
 ## Qué ocurre con tus cambios
 
 - Puedes editar con Excel cerrado. Al ejecutar `vba dev .`, se aplican los cambios pendientes.
-- El código de `src` tiene prioridad sobre cambios de código hechos en Excel.
+- Con el proceso encendido, guardar código en Excel actualiza `src`, y guardar en `src` actualiza Excel.
+- Al reiniciar, tiene prioridad `src`. Si el mismo módulo cambia en ambos lados antes de sincronizar, también gana `src`.
 - Crear o borrar un módulo en `src` lo crea o borra en Excel.
 - Borrar un módulo en Excel y guardar elimina su archivo, salvo que tenga cambios locales pendientes: esos cambios ganan.
 - Conserva `.vba`: guarda el estado y los respaldos. Las hojas y `ThisWorkbook` no se borran eliminando su archivo.

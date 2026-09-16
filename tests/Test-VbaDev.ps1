@@ -32,6 +32,12 @@ End Function
     Assert ($plan.Count -eq 1 -and $plan[0].Direction -eq 'Push') 'offline source edit is pushed on restart'
     $plan = @(Get-VbaChangePlan $base $changed $state)
     Assert ($plan.Count -eq 1 -and $plan[0].Direction -eq 'Push') 'source restores Excel-only code edits'
+    $plan = @(Get-VbaChangePlan $base $changed $state -Bidirectional)
+    Assert ($plan.Count -eq 1 -and $plan[0].Direction -eq 'Pull') 'live Excel-only edit is extracted'
+    $plan = @(Get-VbaChangePlan $changed $base $state -Bidirectional)
+    Assert ($plan.Count -eq 1 -and $plan[0].Direction -eq 'Push') 'live source-only edit is imported'
+    $plan = @(Get-VbaChangePlan $changed @{ A = @{ Hash = 'different'; TextHash = 'different' } } $state -Bidirectional)
+    Assert ($plan.Count -eq 1 -and $plan[0].Direction -eq 'Push') 'source wins simultaneous live edits'
     $plan = @(Get-VbaChangePlan $changed @{ A = @{ Hash = 'different'; TextHash = 'different'; Path = 'modules\A.bas' } } $state)
     Assert ($plan.Count -eq 1 -and $plan[0].Direction -eq 'Push') 'source wins concurrent edits'
     $plan = @(Get-VbaChangePlan $base @{} $state)

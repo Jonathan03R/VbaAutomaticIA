@@ -59,6 +59,30 @@ $module = Get-Module VbaDev
             throw 'Open Excel does not contain the saved source edit.'
         }
         Write-Host 'PASS: same open Excel workbook contains the live edit'
+        $excelMarker = "' live-edit-from-Excel"
+        $component.CodeModule.AddFromString($excelMarker)
+        $connection.Book.Save()
+        $deadline = [DateTime]::UtcNow.AddSeconds(20)
+        do {
+            Start-Sleep -Milliseconds 300
+            $exported = [IO.File]::ReadAllText($file.FullName, $script:Utf8).Contains($excelMarker)
+        } until ($exported -or [DateTime]::UtcNow -gt $deadline)
+        if (-not $exported) { throw ('Excel edit was not exported: ' + (Read-Log $log) + (Read-Log $errorLog)) }
+        Write-Host 'PASS: saving an edit in the Excel editor updates the source file'
+        $returnMarker = "' source-edit-after-Excel"
+        Write-VbaText $file.FullName ([IO.File]::ReadAllText($file.FullName, $script:Utf8) + "`r`n$returnMarker`r`n")
+        $expected = (Get-VbaSnapshot $source)[$file.BaseName].Hash
+        $deadline = [DateTime]::UtcNow.AddSeconds(20)
+        do {
+            Start-Sleep -Milliseconds 300
+            $state = Read-VbaState (Join-Path $temp '.vba\state.json')
+            $synced = $state.Source[$file.BaseName].Hash -eq $expected
+        } until ($synced -or [DateTime]::UtcNow -gt $deadline)
+        if (-not $synced) { throw 'Source edit after Excel export was not imported.' }
+        $component = $connection.Project.VBComponents.Item($file.BaseName)
+        $code = $component.CodeModule.Lines(1, $component.CodeModule.CountOfLines)
+        if (-not $code.Contains($excelMarker) -or -not $code.Contains($returnMarker)) { throw 'Round trip lost one of the edits.' }
+        Write-Host 'PASS: editing source after Excel preserves both edits in the workbook'
         $connection.Project.VBComponents.Remove($component)
         $connection.Book.Save()
         $deadline = [DateTime]::UtcNow.AddSeconds(20)

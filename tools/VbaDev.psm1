@@ -107,7 +107,7 @@ function Save-VbaState([string] $Path, $Source, $Book) {
     Move-Item -LiteralPath $temp -Destination $Path -Force
 }
 
-function Get-VbaChangePlan($Source, $Book, $State) {
+function Get-VbaChangePlan($Source, $Book, $State, [switch] $Bidirectional) {
     $actions = @()
     $names = @(@($Source.Keys) + @($Book.Keys) + @($State.Source.Keys) + @($State.Book.Keys) | Sort-Object -Unique)
     foreach ($name in $names) {
@@ -126,7 +126,10 @@ function Get-VbaChangePlan($Source, $Book, $State) {
                 $direction = if ($State.Book.ContainsKey($name)) { 'Pull' } else { 'Push' }
                 $actions += @{ Name = $name; Direction = $direction }
             }
-            elseif ($bookChanged) { $actions += @{ Name = $name; Direction = 'Push' } }
+            elseif ($bookChanged) {
+                $direction = if ($Bidirectional) { 'Pull' } else { 'Push' }
+                $actions += @{ Name = $name; Direction = $direction }
+            }
         }
         elseif ($Book.ContainsKey($name)) {
             # First appearance of a component created inside Excel.
@@ -358,7 +361,7 @@ function Disconnect-VbaWorkbook($Connection, [switch] $Close) {
 }
 
 function Sync-VbaProject($Connection, [string] $SourceRoot, [string] $StatePath, [switch] $Flat,
-    [ValidateSet('Auto', 'Push', 'Pull')] [string] $Direction = 'Auto') {
+    [ValidateSet('Auto', 'Push', 'Pull')] [string] $Direction = 'Auto', [switch] $Bidirectional) {
     $stage = New-VbaTemp
     $sourceStage = New-VbaTemp
     $events = $Connection.Excel.EnableEvents
@@ -388,7 +391,7 @@ function Sync-VbaProject($Connection, [string] $SourceRoot, [string] $StatePath,
             Write-Host "Extracted $($bookMap.Count) components -> $SourceRoot" -ForegroundColor Cyan
             return
         }
-        $actions = @(Get-VbaChangePlan $sourceMap $bookMap $state)
+        $actions = @(Get-VbaChangePlan $sourceMap $bookMap $state -Bidirectional:$Bidirectional)
         $push = @($actions | Where-Object { $_.Direction -eq 'Push' })
         if ($push.Count -gt 0) {
             # Validate all document deletions before changing any component.
@@ -598,7 +601,7 @@ function Start-VbaProject([string] $Path, [switch] $Once, [string] $SourceRoot, 
                     Start-Sleep -Milliseconds 250
                     $stable = Get-VbaFingerprint (Get-VbaSnapshot $SourceRoot)
                     if ($stable -ne $currentSource) { continue }
-                    Sync-VbaProject $connection $SourceRoot $statePath -Flat:$Flat
+                    Sync-VbaProject $connection $SourceRoot $statePath -Flat:$Flat -Bidirectional
                     $lastSource = Get-VbaFingerprint (Read-VbaState $statePath).Source
                     $lastBookWrite = (Get-Item -LiteralPath $workbook).LastWriteTimeUtc.Ticks
                     $lastError = ''
