@@ -1,160 +1,53 @@
 # VBA Dev
 
-Herramienta de consola para editar VBA fuera de Excel. Recibe un libro existente, extrae sus componentes a archivos y mantiene el libro abierto mientras sincroniza los cambios guardados.
+Edita tus macros en VS Code. Al guardar el código, se actualiza en Excel.
 
-## Instalación en otra computadora
+## 1. Instala
 
-1. Instala los requisitos indicados más abajo: Windows y Excel de escritorio.
-2. Clona este repositorio privado con una cuenta autorizada, o descarga su ZIP desde GitHub y extráelo, por ejemplo en `C:\Herramientas\VbaAutomaticIA`.
-3. En **Variables de entorno > Variables de usuario > Path > Editar > Nuevo**, agrega `C:\Herramientas\VbaAutomaticIA`. Agrega la carpeta, no el archivo `vba.cmd`.
-4. Cierra y vuelve a abrir VS Code o PowerShell.
-5. Desde la carpeta que contiene tu Excel, ejecuta:
+Necesitas **Windows y Excel de escritorio**.
+
+1. Descarga este repositorio: **Code > Download ZIP**.
+2. Extrae la carpeta, por ejemplo en `C:\Herramientas\VbaAutomaticIA`.
+3. Agrega esa carpeta al **Path** de las variables de entorno de tu usuario.
+4. Cierra y vuelve a abrir VS Code.
+
+En Excel, activa:
+
+**Archivo > Opciones > Centro de confianza > Configuración del Centro de confianza > Configuración de macros > Confiar en el acceso al modelo de objetos de proyectos de VBA**.
+
+## 2. Usa tu Excel
+
+Pon tu archivo `.xlsm` o `.xlsb` en una carpeta. Abre esa carpeta en VS Code y ejecuta en la terminal:
 
 ```powershell
 vba dev .
 ```
 
-Para crear un proyecto en una carpeta vacía, ejecuta `vba new .`. No necesitas instalar Python ni Node.js. Conserva juntos `vba.cmd`, `vba.ps1` y la carpeta `tools`.
+Se abre Excel y aparece la carpeta `src` con tu código. **Edita sus archivos y guarda con Ctrl+S**: los cambios pasan a Excel.
 
-Este repositorio distribuye código y documentación. Los libros Excel, recursos binarios de formularios, respaldos y el código extraído localmente en `src` quedan fuera del repositorio.
+Si pide contraseña, escríbela en Excel. Si aparece la ventana de propiedades, ciérrala para continuar.
 
-## Usar un Excel existente
+## 3. Comandos
 
-Pon tu `.xlsm` o `.xlsb` en una carpeta propia. Desde la carpeta de esta herramienta ejecuta:
+El punto `.` significa **la carpeta donde estás**.
 
-```powershell
-.\vba.cmd dev "C:\MisProyectos\Ventas\Ventas.xlsm"
-```
+| Comando | Para qué sirve |
+|---|---|
+| `vba dev .` | Trabajar con un Excel existente y sincronizar mientras editas. |
+| `vba new .` | Crear Excel y código en una carpeta vacía, y empezar a sincronizar. |
+| `vba dev . -Once` | Aplicar los cambios pendientes una vez y terminar. |
+| `vba new . -Once` | Crear el proyecto y terminar sin seguir sincronizando. |
 
-También puedes indicar la carpeta si contiene un único libro:
+**Para detener:** pulsa `Ctrl+C` o cierra el libro de Excel.
 
-```powershell
-.\vba.cmd dev "C:\MisProyectos\Ventas"
-```
+**Para continuar otro día:** ejecuta otra vez `vba dev .`.
 
-La primera ejecución extrae el código. Las siguientes conservan tus archivos y sincronizan los cambios pendientes, incluso los realizados con la herramienta apagada.
+## Qué ocurre con tus cambios
 
-```text
-Ventas/
-├── Ventas.xlsm
-├── src/
-│   ├── modules/       # .bas: módulos estándar
-│   ├── classes/       # .cls: clases
-│   ├── forms/         # .frm y .frx: formularios y sus recursos
-│   └── documents/     # .cls: hojas y ThisWorkbook
-└── .vba/
-    ├── project.json
-    ├── state.json
-    └── backups/       # copia del libro antes de importar cambios
-```
+- Puedes editar con Excel cerrado. Al ejecutar `vba dev .`, se aplican los cambios pendientes.
+- El código de `src` tiene prioridad sobre cambios de código hechos en Excel.
+- Crear o borrar un módulo en `src` lo crea o borra en Excel.
+- Borrar un módulo en Excel y guardar elimina su archivo, salvo que tenga cambios locales pendientes: esos cambios ganan.
+- Conserva `.vba`: guarda el estado y los respaldos. Las hojas y `ThisWorkbook` no se borran eliminando su archivo.
 
-Abre `src` con tu editor o IA. Al guardar un archivo, su componente se actualiza en Excel, normalmente en alrededor de un segundo cuando Excel está disponible. Con autoguardado en el editor, basta editar. Mantén el comando ejecutándose. `Ctrl+C` detiene la vigilancia y deja Excel abierto. También puedes cerrar el libro desde Excel: el comando detecta el cierre y termina. Si Excel muestra una pregunta de guardado, respóndela normalmente; la herramienta espera mientras Excel está ocupado.
-
-`src` tiene prioridad para el código: sus cambios pendientes se importan al reiniciar, aunque Excel también haya cambiado. Los cambios de código hechos solamente en Excel se reemplazan por la versión de `src`. Los componentes nuevos creados en Excel se extraen a `src`. Si eliminas un componente en Excel y guardas el libro, se elimina su archivo; si ese archivo tiene cambios locales pendientes, se conserva y vuelve a importarse a Excel. Los cambios en celdas se conservan; guardar una sincronización también guarda el resto del libro abierto.
-
-## Crear un proyecto nuevo
-
-Si ya estás dentro de una carpeta vacía, crea el proyecto allí mismo:
-
-```powershell
-& "C:\Users\USER\Documents\VbaAutomaticIA\vba.cmd" new .
-```
-
-Se crean `excel`, `src` y `.vba` directamente dentro de la carpeta actual. También puedes indicar una carpeta nueva o una carpeta existente vacía:
-
-```powershell
-.\vba.cmd new "C:\MisProyectos\MiMacro"
-```
-
-Crea `MiMacro\excel\MiMacro.xlsm`, un módulo `Main` de ejemplo, las carpetas de código y empieza a vigilar. Para continuar otro día:
-
-```powershell
-.\vba.cmd dev "C:\MisProyectos\MiMacro"
-```
-
-## Requisitos
-
-- Windows con Excel de escritorio instalado.
-- Windows PowerShell 5.1. El lanzador lo utiliza automáticamente, incluso desde PowerShell 7.
-- En Excel: **Archivo > Opciones > Centro de confianza > Configuración del Centro de confianza > Configuración de macros > Confiar en el acceso al modelo de objetos de proyectos de VBA**.
-- Conocer la contraseña, si el libro o proyecto VBA está protegido, y tener permiso de escritura.
-
-## Contraseñas
-
-Usa el mismo comando `vba.cmd dev`. Si el archivo requiere contraseña de apertura o escritura, Excel la solicita en su ventana antes de abrirlo. Si el proyecto VBA está bloqueado, la herramienta muestra el editor y abre el diálogo nativo de propiedades para que introduzcas su contraseña. Si después aparecen las propiedades, cierra ese cuadro: la sincronización continúa automáticamente al verificar el desbloqueo.
-
-Son contraseñas distintas: un archivo puede pedir ambas. Escríbelas directamente en Excel; la herramienta no las recibe por consola ni las almacena en configuración, historial o registros. Después de abrir el diálogo VBA, la herramienta espera hasta cinco minutos a que Excel permita leer los módulos, incluso si Excel rechaza temporalmente las llamadas mientras escribes. Si cancelas el diálogo, pulsa `Ctrl+C` en consola para detener la espera. Si se agota el tiempo, Excel queda abierto para terminar el desbloqueo y reintentar; no se inicia la sincronización mientras siga bloqueado.
-
-Si está desactivado el acceso al modelo de objetos VBA, primero debes habilitar el permiso descrito arriba. La contraseña no sustituye ese permiso. Si Office no permite mostrar su diálogo de propiedades, el mensaje indica cómo desbloquear manualmente el proyecto y reintentar.
-
-La herramienta no cambia la configuración de seguridad de Office. Respeta la configuración de macros del usuario al abrir el libro y desactiva temporalmente eventos durante apertura y guardado para evitar ejecutar manejadores de eventos por la sincronización.
-
-## Editar archivos
-
-Los archivos de texto de `src` usan **UTF-8**. Conserva `Attribute VB_Name`, el nombre del archivo y los `.frx` asociados a formularios. Excel utiliza la página de códigos ANSI del sistema para importar módulos y formularios; si un carácter no puede representarse, la operación falla y conserva un respaldo.
-
-Para agregar un módulo, crea por ejemplo `src\modules\Calculos.bas`:
-
-```vb
-Attribute VB_Name = "Calculos"
-Option Explicit
-
-Public Function Doble(ByVal valor As Double) As Double
-    Doble = valor * 2
-End Function
-```
-
-Eliminar el archivo de un módulo, clase o formulario elimina ese componente de Excel en la siguiente sincronización. Las hojas y `ThisWorkbook` no se eliminan: vacía su código conservando la cabecera. Los controles y el diseño visual de formularios siguen almacenados en el `.frx`; el código de sus eventos se edita en el `.frm`.
-
-Al editar solamente código de un formulario, se conserva su diseño actual de Excel. Los cambios locales en `.frx` también se importan. Para extraer cambios hechos solamente en el diseñador visual de Excel, utiliza `Pull` explícito: los binarios exportados por Excel contienen bytes variables y no se usan para detectar conflictos del lado de Excel. Si editas el diseño en ambos lados, el `.frx` local modificado tiene prioridad.
-
-El sincronizador importa código; no sustituye al compilador ni al depurador de VBA. Ejecuta y prueba tus macros en Excel. Si Excel está ocupado, muestra el error y reintenta cuando vuelve a estar disponible.
-
-## Una sola sincronización
-
-```powershell
-.\vba.cmd dev "C:\MisProyectos\Ventas" -Once
-```
-
-Extrae o sincroniza sin quedarse vigilando. Cierra solamente la instancia de Excel que haya creado para esa ejecución.
-
-También puedes usar el script directamente:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\vba.ps1 dev "C:\MisProyectos\Ventas"
-```
-
-## Prioridad del código y recuperación
-
-Puedes cerrar Excel, editar, crear o eliminar archivos de `src` y volver a ejecutar `dev .`: los cambios pendientes se aplican al libro. Conserva `.vba`, que registra el estado para detectar eliminaciones. Si cambió el código en ambos lados, gana `src`. Antes de modificar el libro se crea un respaldo.
-
-Para conservar intencionalmente cambios de código hechos en Excel, detén el comando y usa `Pull` explícito. Los comandos siguientes reemplazan la otra versión:
-
-```powershell
-# Conservar archivos y llevarlos a Excel.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-Vba.ps1 -Workbook "C:\MisProyectos\Ventas\Ventas.xlsm" -SourceRoot "C:\MisProyectos\Ventas\src" -Direction Push
-
-# Conservar Excel y reemplazar archivos.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-Vba.ps1 -Workbook "C:\MisProyectos\Ventas\Ventas.xlsm" -SourceRoot "C:\MisProyectos\Ventas\src" -Direction Pull
-```
-
-Después reinicia `vba.cmd dev`. Los respaldos anteriores a cada importación quedan en `.vba\backups`; no se borran automáticamente. Si una importación falla, se intenta restaurar el código anterior en memoria y se informa la ubicación del respaldo.
-
-Cada proyecto usa un libro y una carpeta `src`. La extracción inicial no sobrescribe una carpeta de código que ya tenga archivos y carezca de estado de sincronización. Usa una carpeta nueva para tu libro existente, o elige explícitamente `Push`/`Pull` con el script anterior.
-
-## Comprobar la herramienta
-
-Pruebas de lógica y pruebas de integración con libros temporales de Excel:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-VbaDev.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-VbaDev.ps1 -Integration
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-VbaWatch.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-VbaAccess.ps1 -Integration
-```
-
-La prueba `Test-VbaWatch.ps1` abre Excel temporalmente para verificar el flujo real de vigilancia. Requiere un libro local `test.xlsm` con un módulo estándar. `Test-VbaDev.ps1 -Integration` requiere además los ejemplos locales `src\UserForm1.frm` y `src\UserForm1.frx`, con un control y código que contenga `"hola"`. Estos archivos de prueba no se distribuyen en GitHub. Las pruebas trabajan sobre copias; las pruebas de lógica sin `-Integration` no necesitan esos archivos ni abrir Excel.
-
-La prueba de acceso simula contraseña aceptada, espera con diálogo abierto, errores COM transitorios, agotamiento del tiempo y permiso VBA denegado; con `-Integration` verifica además que Excel exponga el comando nativo de propiedades. No introduce contraseñas en diálogos reales. Para comprobarlo manualmente, ejecuta `dev` sobre una copia de un libro protegido, espera unos segundos antes de escribir la contraseña en Excel, cierra las propiedades si aparecen y comprueba que se extraiga `src`. Repite cancelando y pulsa `Ctrl+C`: no debe iniciarse la sincronización.
-
-El antiguo `tools\Clean-VbaTest.ps1` es una utilidad destructiva de limpieza de ejemplos y no participa en este flujo.
+Para agregar módulos, trabajar con formularios o usar opciones avanzadas: [guía completa](docs/GUIA-AVANZADA.md).
