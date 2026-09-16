@@ -50,6 +50,10 @@ End Function
     Assert ($plan.Count -eq 1 -and $plan[0].Direction -eq 'Push') 'source deletion tracked'
     $temp = New-VbaTemp
     try {
+        Write-VbaText (Join-Path $temp 'NombreLegible.bas') "Attribute VB_Name = `"NombreInterno`"`r`nOption Explicit"
+        $named = Get-VbaSnapshot $temp
+        Assert ($named.ContainsKey('NombreInterno') -and $named.NombreInterno.Path -eq 'NombreLegible.bas') 'friendly source filename preserves VBA component identity'
+        Remove-Item -LiteralPath (Join-Path $temp 'NombreLegible.bas')
         Write-VbaText (Join-Path $temp 'Form1.frm') "VERSION 5.00`r`nAttribute VB_Name = `"Form1`"`r`nOleObjectBlob = `"Form1.frx`":0000"
         [IO.File]::WriteAllBytes((Join-Path $temp 'Form1.frx'), [byte[]]@(1, 2, 3))
         $before = Get-VbaSnapshot $temp

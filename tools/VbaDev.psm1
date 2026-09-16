@@ -51,21 +51,19 @@ function Export-VbaProject($Project, [string] $Root, [switch] $Flat) {
 function Get-VbaSnapshot([string] $Root) {
     $map = @{}
     foreach ($file in @(Get-ChildItem -LiteralPath $Root -File -Recurse | Where-Object { $_.Extension -in '.bas', '.cls', '.frm' })) {
-        $name = $file.BaseName
-        if ($map.ContainsKey($name)) { throw "Duplicate VBA component: $name" }
         $text = [IO.File]::ReadAllText($file.FullName, $script:Utf8)
         $match = [regex]::Match($text, '(?m)^Attribute VB_Name = "([^"]+)"\s*$')
-        if (-not $match.Success -or $match.Groups[1].Value -cne $name) {
-            throw "File '$($file.Name)' must retain Attribute VB_Name = `"$name`"."
-        }
+        if (-not $match.Success) { throw "File '$($file.Name)' must contain Attribute VB_Name." }
+        $name = $match.Groups[1].Value
+        if ($map.ContainsKey($name)) { throw "Duplicate VBA component name: $name" }
         $relative = $file.FullName.Substring($Root.TrimEnd('\').Length + 1)
         $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
         $textHash = $hash
         $binaryHash = ''
         $binary = [IO.Path]::ChangeExtension($file.FullName, '.frx')
         if ($file.Extension -eq '.frm') {
-            if ($text -match 'OleObjectBlob\s*=\s*"([^"]+)"' -and $Matches[1] -cne ($name + '.frx')) {
-                throw "Form '$name' must reference '$name.frx' in the same folder."
+            if ($text -match 'OleObjectBlob\s*=\s*"([^"]+)"' -and $Matches[1] -cne ($file.BaseName + '.frx')) {
+                throw "Form '$($file.Name)' must reference '$($file.BaseName).frx' in the same folder."
             }
             if ($text -match 'OleObjectBlob' -and -not (Test-Path -LiteralPath $binary)) {
                 throw "Missing form resource: $binary"

@@ -94,7 +94,7 @@ La herramienta no cambia la configuración de seguridad de Office. Respeta la co
 
 Los archivos de texto de `src` usan **UTF-8**. Conserva `Attribute VB_Name`, el nombre del archivo y los `.frx` asociados a formularios. Excel utiliza la página de códigos ANSI del sistema para importar módulos y formularios; si un carácter no puede representarse, la operación falla y conserva un respaldo.
 
-Puedes organizar `modules`, `classes` y `forms` con subcarpetas propias, por ejemplo `modules\\ventas\\Facturas.bas`. La sincronización conserva esa ubicación aunque edites el componente desde Excel. El nombre de cada componente debe seguir siendo único en todo `src`; Excel no muestra esas subcarpetas.
+Puedes organizar `modules`, `classes` y `forms` con subcarpetas propias, por ejemplo `modules\\ventas\\Facturas.bas`. La sincronización conserva esa ubicación aunque edites el componente desde Excel. Puedes usar un nombre descriptivo de archivo distinto al componente interno: `ClienteDllSunat.bas` puede conservar `Attribute VB_Name = "OK_FROMDLL"`. El nombre interno debe seguir siendo único en todo `src`; Excel no muestra estas carpetas ni el nombre físico del archivo.
 
 Para agregar un módulo, crea por ejemplo `src\modules\Calculos.bas`:
 

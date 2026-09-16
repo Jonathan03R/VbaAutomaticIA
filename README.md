@@ -58,6 +58,7 @@ El punto `.` significa **la carpeta donde estás**.
 - Al reiniciar, tiene prioridad `src`. Si el mismo módulo cambia en ambos lados antes de sincronizar, también gana `src`.
 - Crear o borrar un módulo en `src` lo crea o borra en Excel.
 - Puedes crear subcarpetas dentro de `modules`, `classes` o `forms`. Se conservan al sincronizar con Excel.
+- Puedes usar nombres descriptivos de archivo; `Attribute VB_Name` conserva identidad interna de Excel y macros.
 - Borrar un módulo en Excel y guardar elimina su archivo, salvo que tenga cambios locales pendientes: esos cambios ganan.
 - Conserva `.vba`: guarda el estado y los respaldos. Las hojas y `ThisWorkbook` no se borran eliminando su archivo.
 
