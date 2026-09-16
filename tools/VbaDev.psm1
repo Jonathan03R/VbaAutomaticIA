@@ -483,6 +483,32 @@ function New-VbaProject([string] $Path) {
     }
 }
 
+function Move-VbaWorkbookToExcel([string] $Workbook, [string] $Root, [string] $ConfigPath, [string] $ConfigText) {
+    $rootPath = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+    $original = [IO.Path]::GetFullPath($Workbook)
+    if ((Split-Path -Parent $original) -ine $rootPath) { return $original }
+    $directory = Join-Path $rootPath 'excel'
+    $target = Join-Path $directory (Split-Path -Leaf $original)
+    if (Test-Path -LiteralPath $target) { throw "Ya existe un archivo en el destino: $target. No se reemplazo ninguno." }
+    # Reject open workbooks before moving; never close the user's Excel instance.
+    try {
+        $handle = [IO.File]::Open($original, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        $handle.Dispose()
+    } catch { throw "No se puede mover el libro. Cierra Excel y vuelve a ejecutar dev .: $original. $($_.Exception.Message)" }
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    Move-Item -LiteralPath $original -Destination $target -ErrorAction Stop
+    try {
+        # Persist the new location before synchronization, including on unlock failures.
+        Write-VbaText ($ConfigPath + '.tmp') $ConfigText
+        Move-Item -LiteralPath ($ConfigPath + '.tmp') -Destination $ConfigPath -Force -ErrorAction Stop
+    } catch {
+        Move-Item -LiteralPath $target -Destination $original -ErrorAction Stop
+        throw
+    }
+    Write-Host "Libro organizado: $target" -ForegroundColor Cyan
+    return $target
+}
+
 function Start-VbaProject([string] $Path, [switch] $Once, [string] $SourceRoot, [switch] $Flat,
     [ValidateSet('Auto', 'Push', 'Pull')] [string] $Direction = 'Auto') {
     $pathInfo = Get-Item -LiteralPath $Path
@@ -534,6 +560,12 @@ function Start-VbaProject([string] $Path, [switch] $Once, [string] $SourceRoot, 
         foreach ($folder in @('modules', 'classes', 'forms', 'documents')) { New-Item -ItemType Directory -Path (Join-Path $SourceRoot $folder) -Force | Out-Null }
     }
     $statePath = Join-Path $meta 'state.json'
+    $layoutConfig = @{
+        Workbook = 'excel\' + (Split-Path -Leaf $workbook)
+        Source = $SourceRoot.Substring($root.TrimEnd('\').Length + 1)
+        Flat = [bool]$Flat
+    } | ConvertTo-Json
+    $workbook = Move-VbaWorkbookToExcel $workbook $root $configPath $layoutConfig
     $connection = $null
     $started = $false
     try {

@@ -33,6 +33,8 @@ $module = Get-Module VbaDev
         } until ($ready -or [DateTime]::UtcNow -gt $deadline)
         if (-not $ready) { throw 'Watcher did not start within 30 seconds.' }
         Write-Host 'PASS: CLI extracts existing workbook and starts watching'
+        $bookPath = Join-Path $temp 'excel\Existing.xlsm'
+        if (-not (Test-Path -LiteralPath $bookPath)) { throw 'Existing workbook was not organized into excel.' }
         $source = Join-Path $temp 'src'
         $files = @(Get-ChildItem -LiteralPath (Join-Path $source 'modules') -Filter '*.bas')
         $file = $files[0]

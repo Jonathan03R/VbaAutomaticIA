@@ -32,11 +32,12 @@ También puedes indicar la carpeta si contiene un único libro:
 .\vba.cmd dev "C:\MisProyectos\Ventas"
 ```
 
-La primera ejecución extrae el código. Las siguientes conservan tus archivos y sincronizan los cambios pendientes, incluso los realizados con la herramienta apagada.
+Si el libro está en la raíz del proyecto, `dev` lo mueve a `excel` y actualiza la configuración, también en proyectos existentes. Cierra el libro antes de este traslado. Si ya existe otro archivo con ese nombre en el destino, no se reemplaza. La primera ejecución extrae el código. Las siguientes conservan tus archivos y sincronizan los cambios pendientes, incluso los realizados con la herramienta apagada.
 
 ```text
 Ventas/
-├── Ventas.xlsm
+├── excel/
+│   └── Ventas.xlsm
 ├── src/
 │   ├── modules/       # .bas: módulos estándar
 │   ├── classes/       # .cls: clases

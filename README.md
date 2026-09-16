@@ -23,7 +23,16 @@ Pon tu archivo `.xlsm` o `.xlsb` en una carpeta. Abre esa carpeta en VS Code y e
 vba dev .
 ```
 
-Se abre Excel y aparece la carpeta `src` con tu código. **Edita sus archivos y guarda con Ctrl+S**: los cambios pasan a Excel.
+Si el libro está en la carpeta principal, ciérralo antes de ejecutar el comando: la herramienta lo mueve a `excel`. Luego lo abre y crea `src` con tu código. **Edita sus archivos y guarda con Ctrl+S**: los cambios pasan a Excel.
+
+Tanto `new` como `dev` dejan este orden:
+
+```text
+TuProyecto/
+├── excel/   Libro Excel
+├── src/     Código VBA
+└── .vba/    Configuración y respaldos
+```
 
 Si pide contraseña, escríbela en Excel. Si aparece la ventana de propiedades, ciérrala para continuar.
 
