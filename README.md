@@ -46,6 +46,8 @@ El punto `.` significa **la carpeta donde estás**.
 | `vba new .` | Crear Excel y código en una carpeta vacía, y empezar a sincronizar. |
 | `vba dev . -Once` | Aplicar los cambios pendientes una vez y terminar. |
 | `vba new . -Once` | Crear el proyecto y terminar sin seguir sincronizando. |
+| `vba ui .` | Editar Ribbon Custom UI con Excel cerrado. |
+| `vba ui . -Once` | Extraer o aplicar Custom UI una vez y terminar. |
 
 **Para detener:** pulsa `Ctrl+C` o cierra el libro de Excel.
 
@@ -63,3 +65,17 @@ El punto `.` significa **la carpeta donde estás**.
 - Conserva `.vba`: guarda el estado y los respaldos. Las hojas y `ThisWorkbook` no se borran eliminando su archivo.
 
 Para agregar módulos, trabajar con formularios o usar opciones avanzadas: [guía completa](docs/GUIA-AVANZADA.md).
+
+## Custom UI Ribbon
+
+`vba ui .` trabaja botones y pestañas Ribbon desde `src\custom-ui\customUI.xml`. Solo admite `.xlsm` que ya contengan Custom UI.
+
+Primera vez, con Excel cerrado:
+
+```powershell
+vba ui . -Once
+```
+
+Extrae XML. Edita texto, IDs o callbacks en VS Code. Para aplicar cambio, con Excel cerrado, ejecuta otra vez `vba ui . -Once`; o usa `vba ui .` para vigilar guardados. La herramienta guarda copia del libro en `.vba\backups` antes de modificarlo.
+
+No ejecutes `vba dev .` y `vba ui .` a la vez. El segundo comando se detiene y muestra error en español. Para pasar de uno a otro, detén primero con `Ctrl+C`.

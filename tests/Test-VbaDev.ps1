@@ -8,6 +8,19 @@ $module = Get-Module VbaDev
         if (-not $Condition) { throw "FAIL: $Message" }
         Write-Host "PASS: $Message"
     }
+    function New-CustomUiWorkbook([string] $Path, [string] $Xml) {
+        Add-Type -AssemblyName System.IO.Compression
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $stream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew)
+        try {
+            $archive = New-Object IO.Compression.ZipArchive($stream, 1, $false)
+            try {
+                $entry = $archive.CreateEntry('customUI/customUI.xml')
+                $writer = New-Object IO.StreamWriter($entry.Open(), $script:Utf8)
+                try { $writer.Write($Xml) } finally { $writer.Dispose() }
+            } finally { $archive.Dispose() }
+        } finally { $stream.Dispose() }
+    }
     $header = @'
 VERSION 1.0 CLASS
 BEGIN
@@ -64,6 +77,56 @@ End Function
         Save-VbaState $statePath @{} @{}
         $empty = Read-VbaState $statePath
         Assert ($empty.Source.Count -eq 0) 'empty state can be resumed'
+
+        $uiBook = Join-Path $temp 'Ribbon.xlsm'
+        $uiSource = Join-Path $temp 'ui-src'
+        $uiXml = '<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui"><ribbon /></customUI>'
+        New-CustomUiWorkbook $uiBook $uiXml
+        Export-CustomUi $uiBook $uiSource
+        $uiFile = Join-Path $uiSource 'custom-ui\customUI.xml'
+        Assert ([IO.File]::ReadAllText($uiFile, $script:Utf8) -eq $uiXml) 'Custom UI is extracted from XLSM'
+        $changedUiXml = '<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui"><ribbon><tabs /></ribbon></customUI>'
+        Write-VbaText $uiFile $changedUiXml
+        Import-CustomUi $uiBook $uiSource
+        $verifySource = Join-Path $temp 'ui-verify'
+        Export-CustomUi $uiBook $verifySource
+        Assert ([IO.File]::ReadAllText((Join-Path $verifySource 'custom-ui\customUI.xml'), $script:Utf8) -eq $changedUiXml) 'Custom UI source change is saved into XLSM'
+        Write-VbaText $uiFile '<customUI>'
+        try { Import-CustomUi $uiBook $uiSource; throw 'Expected invalid XML error.' }
+        catch { Assert ($_.Exception.Message -match 'XML.*válido') 'invalid Custom UI XML reports Spanish error' }
+        $uiLockRoot = Join-Path $temp 'ui-lock'
+        New-Item -ItemType Directory -Path $uiLockRoot | Out-Null
+        $lock = Acquire-VbaSessionLock $uiLockRoot 'dev'
+        try {
+            try { Acquire-VbaSessionLock $uiLockRoot 'ui'; throw 'Expected active lock error.' }
+            catch { Assert ($_.Exception.Message -match 'vba dev') 'active dev lock blocks Custom UI with Spanish error' }
+        } finally { Release-VbaSessionLock $lock }
+        $uiLock = Acquire-VbaSessionLock $uiLockRoot 'ui'
+        Release-VbaSessionLock $uiLock
+        Assert (-not (Test-Path -LiteralPath (Join-Path $uiLockRoot 'session.lock'))) 'session lock is released'
+
+        $uiProject = Join-Path $temp 'UiProject'
+        New-Item -ItemType Directory -Path $uiProject | Out-Null
+        $uiProjectBook = Join-Path $uiProject 'Ribbon.xlsm'
+        New-CustomUiWorkbook $uiProjectBook $uiXml
+        Start-CustomUiProject $uiProject -Once
+        $uiProjectFile = Join-Path $uiProject 'src\custom-ui\customUI.xml'
+        Assert (Test-Path -LiteralPath $uiProjectFile) 'vba ui exports Custom UI into project source'
+        Write-VbaText $uiProjectFile $changedUiXml
+        Start-CustomUiProject $uiProject -Once
+        $uiProjectVerify = Join-Path $temp 'ui-project-verify'
+        Export-CustomUi $uiProjectBook $uiProjectVerify
+        Assert ([IO.File]::ReadAllText((Join-Path $uiProjectVerify 'custom-ui\customUI.xml'), $script:Utf8) -eq $changedUiXml) 'vba ui once imports edited Custom UI'
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot '..\vba.ps1') ui $uiProject -Once | Out-Null
+        Assert ($LASTEXITCODE -eq 0) 'CLI accepts vba ui command'
+        $devLock = Acquire-VbaSessionLock (Join-Path $uiProject '.vba') 'dev'
+        try { Start-CustomUiProject $uiProject -Once; throw 'Expected vba ui lock error.' }
+        catch { Assert ($_.Exception.Message -match 'vba dev') 'vba ui refuses project while vba dev is active' }
+        finally { Release-VbaSessionLock $devLock }
+        $uiModeLock = Acquire-VbaSessionLock (Join-Path $uiProject '.vba') 'ui'
+        try { Start-VbaProject $uiProject -Once; throw 'Expected vba dev lock error.' }
+        catch { Assert ($_.Exception.Message -match 'vba ui') 'vba dev refuses project while vba ui is active' }
+        finally { Release-VbaSessionLock $uiModeLock }
     } finally { Remove-VbaTemp $temp }
 }
 

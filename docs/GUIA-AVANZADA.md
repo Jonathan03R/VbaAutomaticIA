@@ -113,6 +113,35 @@ Al editar solamente código de un formulario, se conserva su diseño actual de E
 
 El sincronizador importa código; no sustituye al compilador ni al depurador de VBA. Ejecuta y prueba tus macros en Excel. Si Excel está ocupado, muestra el error y reintenta cuando vuelve a estar disponible.
 
+## Custom UI Ribbon
+
+Custom UI controla pestañas y botones Ribbon desde XML. No es código `.bas`, `.cls` ni `.frm`.
+
+Solo admite libros `.xlsm` que ya tengan Custom UI. Excel debe estar cerrado durante todo este modo:
+
+```powershell
+vba ui . -Once
+```
+
+La primera ejecución extrae las partes Ribbon existentes a `src\custom-ui\customUI.xml` y, si existe, `src\custom-ui\customUI14.xml`. Edita esos archivos UTF-8 en VS Code. Ejecuta el mismo comando nuevamente para aplicar XML local al libro. Antes de cambiarlo, se guarda copia completa en `.vba\backups`.
+
+Para vigilar XML mientras editas, usa:
+
+```powershell
+vba ui .
+```
+
+El libro sigue cerrado; cada guardado XML válido actualiza el `.xlsm`. Después abre Excel normalmente para ver Ribbon. La herramienta no abre Excel ni genera capturas.
+
+`vba dev .` y `vba ui .` son excluyentes. Si uno está activo, el otro se detiene sin modificar nada e indica en español que debes detener el primer comando con `Ctrl+C`.
+
+Errores habituales:
+
+- Libro abierto: ciérralo antes de ejecutar `vba ui`.
+- XML inválido o raíz distinta de `customUI`: corrige XML; libro no se reemplaza.
+- Libro sin Custom UI: primera versión no crea Ribbon desde cero.
+- `.xlsb`: usa `.xlsm`; formato binario no está soportado en este modo.
+
 ## Una sola sincronización
 
 ```powershell
