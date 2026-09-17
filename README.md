@@ -49,7 +49,7 @@ El punto `.` significa **la carpeta donde estás**.
 | `vba ui .` | Editar Ribbon Custom UI con Excel cerrado. |
 | `vba ui . -Once` | Extraer o aplicar Custom UI una vez y terminar. |
 
-**Para detener:** pulsa `Ctrl+C` o cierra el libro de Excel.
+**Para detener:** pulsa `Ctrl+C` o cierra el libro de Excel. `Ctrl+C` guarda y cierra el libro manejado; si la herramienta abrió Excel, también cierra esa ventana.
 
 **Para continuar otro día:** ejecuta otra vez `vba dev .`.
 

@@ -74,15 +74,22 @@ function Export-CustomUi([string] $Workbook, [string] $SourceRoot) {
         $archive = New-Object IO.Compression.ZipArchive($stream, 0, $false)
         try {
             $found = 0
-            foreach ($part in $script:CustomUiParts) {
-                $entry = $archive.GetEntry($part)
-                if (-not $entry) { continue }
-                $reader = New-Object IO.StreamReader($entry.Open(), [Text.Encoding]::UTF8, $true)
-                try { Write-VbaText (Join-Path $destination ([IO.Path]::GetFileName($part))) $reader.ReadToEnd() }
-                finally { $reader.Dispose() }
+            $exported = @{}
+            foreach ($entry in @($archive.Entries | Where-Object { $_.FullName.StartsWith('customUI/') -and -not $_.FullName.EndsWith('/') })) {
+                $relative = $entry.FullName.Substring('customUI/'.Length).Replace('/', '\')
+                $target = Join-Path $destination $relative
+                New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+                $input = $entry.Open()
+                $output = [IO.File]::Open($target, [IO.FileMode]::Create, [IO.FileAccess]::Write)
+                try { $input.CopyTo($output) } finally { $output.Dispose(); $input.Dispose() }
+                $exported[$relative] = $true
                 $found++
             }
             if ($found -eq 0) { throw 'El libro no contiene Custom UI Ribbon.' }
+            foreach ($existing in @(Get-ChildItem -LiteralPath $destination -File -Recurse)) {
+                $relative = $existing.FullName.Substring($destination.TrimEnd('\').Length + 1)
+                if (-not $exported.ContainsKey($relative)) { Remove-Item -LiteralPath $existing.FullName -Force }
+            }
         } finally { $archive.Dispose() }
     } finally { $stream.Dispose() }
 }
@@ -92,9 +99,10 @@ function Import-CustomUi([string] $Workbook, [string] $SourceRoot) {
     Import-CustomUiAssemblies
     $source = Join-Path $SourceRoot 'custom-ui'
     $changes = @{}
-    foreach ($part in $script:CustomUiParts) {
-        $file = Join-Path $source ([IO.Path]::GetFileName($part))
-        if (Test-Path -LiteralPath $file -PathType Leaf) { $changes[$part] = Read-CustomUiXml $file }
+    foreach ($file in @(Get-ChildItem -LiteralPath $source -File -Recurse -ErrorAction SilentlyContinue)) {
+        $relative = $file.FullName.Substring($source.TrimEnd('\').Length + 1).Replace('\', '/')
+        if ($relative -in 'customUI.xml', 'customUI14.xml') { $null = Read-CustomUiXml $file.FullName }
+        $changes['customUI/' + $relative] = [IO.File]::ReadAllBytes($file.FullName)
     }
     if ($changes.Count -eq 0) { throw 'No hay archivos Custom UI para guardar.' }
     $temporary = $Workbook + '.custom-ui-' + [guid]::NewGuid().ToString('N') + '.tmp'
@@ -104,13 +112,15 @@ function Import-CustomUi([string] $Workbook, [string] $SourceRoot) {
         try {
             $archive = New-Object IO.Compression.ZipArchive($stream, 2, $false)
             try {
+                foreach ($existing in @($archive.Entries | Where-Object { $_.FullName.StartsWith('customUI/') -and -not $_.FullName.EndsWith('/') })) {
+                    if (-not $changes.ContainsKey($existing.FullName)) { $existing.Delete() }
+                }
                 foreach ($part in $changes.Keys) {
                     $previous = $archive.GetEntry($part)
-                    if (-not $previous) { throw "El libro no contiene parte Ribbon: $part" }
-                    $previous.Delete()
+                    if ($previous) { $previous.Delete() }
                     $entry = $archive.CreateEntry($part)
-                    $writer = New-Object IO.StreamWriter($entry.Open(), $script:Utf8)
-                    try { $writer.Write($changes[$part]) } finally { $writer.Dispose() }
+                    $output = $entry.Open()
+                    try { $output.Write($changes[$part], 0, $changes[$part].Length) } finally { $output.Dispose() }
                 }
             } finally { $archive.Dispose() }
         } finally { $stream.Dispose() }
@@ -166,8 +176,8 @@ function Get-CustomUiProjectPaths([string] $Path) {
 
 function Get-CustomUiFingerprint([string] $SourceRoot) {
     $folder = Join-Path $SourceRoot 'custom-ui'
-    return ((Get-ChildItem -LiteralPath $folder -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object {
-        $_.Name + ':' + (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+    return ((Get-ChildItem -LiteralPath $folder -File -Recurse -ErrorAction SilentlyContinue | Sort-Object FullName | ForEach-Object {
+        $_.FullName.Substring($folder.TrimEnd('\').Length + 1) + ':' + (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
     }) -join ';')
 }
 
@@ -185,6 +195,15 @@ function Start-CustomUiProject([string] $Path, [switch] $Once) {
     try {
         $lock = Acquire-VbaSessionLock $project.Meta 'ui'
         Test-CustomUiWorkbookOpen $project.Workbook
+        $configPath = Join-Path $project.Meta 'project.json'
+        if (-not (Test-Path -LiteralPath $configPath)) {
+            $layout = @{
+                Workbook = 'excel\' + (Split-Path -Leaf $project.Workbook)
+                Source = $project.Source.Substring($project.Root.TrimEnd('\').Length + 1)
+                Flat = $false
+            } | ConvertTo-Json
+            $project.Workbook = Move-VbaWorkbookToExcel $project.Workbook $project.Root $configPath $layout
+        }
         $folder = Join-Path $project.Source 'custom-ui'
         if (-not (Test-Path -LiteralPath $folder -PathType Container)) {
             Export-CustomUi $project.Workbook $project.Source
@@ -197,17 +216,25 @@ function Start-CustomUiProject([string] $Path, [switch] $Once) {
         if ($Once) { return }
         Write-Host "Editando Custom UI: $folder`nGuarda XML para actualizar libro cerrado. Ctrl+C detiene vigilancia." -ForegroundColor Yellow
         $lastSource = Get-CustomUiFingerprint $project.Source
+        $lastBookWrite = (Get-Item -LiteralPath $project.Workbook).LastWriteTimeUtc.Ticks
         while ($true) {
             Start-Sleep -Milliseconds 500
             try {
                 $currentSource = Get-CustomUiFingerprint $project.Source
+                $currentBookWrite = (Get-Item -LiteralPath $project.Workbook).LastWriteTimeUtc.Ticks
                 if ($currentSource -ne $lastSource) {
                     Start-Sleep -Milliseconds 250
                     if ((Get-CustomUiFingerprint $project.Source) -ne $currentSource) { continue }
                     Save-CustomUiBackup $project.Workbook $project.Meta
                     Import-CustomUi $project.Workbook $project.Source
                     $lastSource = Get-CustomUiFingerprint $project.Source
+                    $lastBookWrite = (Get-Item -LiteralPath $project.Workbook).LastWriteTimeUtc.Ticks
                     Write-Host 'Custom UI actualizado en libro.' -ForegroundColor Green
+                } elseif ($currentBookWrite -ne $lastBookWrite) {
+                    Export-CustomUi $project.Workbook $project.Source
+                    $lastSource = Get-CustomUiFingerprint $project.Source
+                    $lastBookWrite = (Get-Item -LiteralPath $project.Workbook).LastWriteTimeUtc.Ticks
+                    Write-Host 'Custom UI actualizado desde libro.' -ForegroundColor Cyan
                 }
             } catch { Write-Warning $_.Exception.Message }
         }
@@ -578,11 +605,18 @@ function Get-VbaWorkbookStatus($Connection, [string] $Path) {
     }
 }
 
+function Should-CloseVbaOnExit([bool] $Once, [bool] $Started) {
+    # El usuario espera que Ctrl+C cierre el libro, igual que una ejecución única.
+    return $true
+}
+
 function Disconnect-VbaWorkbook($Connection, [switch] $Close) {
     if (-not $Connection) { return }
+    if ($Close) {
+        try { $Connection.Book.Close($true) }
+        catch { Write-Warning 'No se pudo guardar y cerrar el libro; revisa Excel.' }
+    }
     if ($Close -and $Connection.Owned) {
-        try { $Connection.Book.Close($false) }
-        catch { Write-Warning 'No se pudo cerrar el libro temporalmente; revisa Excel.' }
         try { $Connection.Excel.Quit() }
         catch { Write-Warning 'Excel sigue abierto. Puedes cerrarlo desde su ventana.' }
     }
@@ -856,7 +890,7 @@ function Start-VbaProject([string] $Path, [switch] $Once, [string] $SourceRoot, 
             }
         }
     } finally {
-        Disconnect-VbaWorkbook $connection -Close:($Once -or -not $started)
+        Disconnect-VbaWorkbook $connection -Close:(Should-CloseVbaOnExit $Once $started)
         Release-VbaSessionLock $sessionLock
     }
 }

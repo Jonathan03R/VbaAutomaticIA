@@ -18,6 +18,12 @@ $module = Get-Module VbaDev
                 $entry = $archive.CreateEntry('customUI/customUI.xml')
                 $writer = New-Object IO.StreamWriter($entry.Open(), $script:Utf8)
                 try { $writer.Write($Xml) } finally { $writer.Dispose() }
+                $relations = $archive.CreateEntry('customUI/_rels/customUI.xml.rels')
+                $relationWriter = New-Object IO.StreamWriter($relations.Open(), $script:Utf8)
+                try { $relationWriter.Write('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>') } finally { $relationWriter.Dispose() }
+                $image = $archive.CreateEntry('customUI/images/prueba/iniciar.png')
+                $imageStream = $image.Open()
+                try { $imageStream.Write([byte[]]@(1, 2, 3), 0, 3) } finally { $imageStream.Dispose() }
             } finally { $archive.Dispose() }
         } finally { $stream.Dispose() }
     }
@@ -85,6 +91,15 @@ End Function
         Export-CustomUi $uiBook $uiSource
         $uiFile = Join-Path $uiSource 'custom-ui\customUI.xml'
         Assert ([IO.File]::ReadAllText($uiFile, $script:Utf8) -eq $uiXml) 'Custom UI is extracted from XLSM'
+        $uiImage = Join-Path $uiSource 'custom-ui\images\prueba\iniciar.png'
+        Assert ((Test-Path -LiteralPath $uiImage) -and ((Get-Item $uiImage).Length -eq 3)) 'Custom UI nested image is extracted from XLSM'
+        $uiFingerprintBeforeImageDelete = Get-CustomUiFingerprint $uiSource
+        Remove-Item -LiteralPath $uiImage
+        Assert ((Get-CustomUiFingerprint $uiSource) -ne $uiFingerprintBeforeImageDelete) 'Custom UI watcher detects nested image deletion'
+        Import-CustomUi $uiBook $uiSource
+        $afterDelete = Join-Path $temp 'ui-after-delete'
+        Export-CustomUi $uiBook $afterDelete
+        Assert (-not (Test-Path -LiteralPath (Join-Path $afterDelete 'custom-ui\images\prueba\iniciar.png'))) 'deleting source Custom UI image deletes it from XLSM'
         $changedUiXml = '<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui"><ribbon><tabs /></ribbon></customUI>'
         Write-VbaText $uiFile $changedUiXml
         Import-CustomUi $uiBook $uiSource
@@ -110,6 +125,7 @@ End Function
         $uiProjectBook = Join-Path $uiProject 'Ribbon.xlsm'
         New-CustomUiWorkbook $uiProjectBook $uiXml
         Start-CustomUiProject $uiProject -Once
+        $uiProjectBook = Join-Path $uiProject 'excel\Ribbon.xlsm'
         $uiProjectFile = Join-Path $uiProject 'src\custom-ui\customUI.xml'
         Assert (Test-Path -LiteralPath $uiProjectFile) 'vba ui exports Custom UI into project source'
         Write-VbaText $uiProjectFile $changedUiXml
@@ -127,6 +143,7 @@ End Function
         try { Start-VbaProject $uiProject -Once; throw 'Expected vba dev lock error.' }
         catch { Assert ($_.Exception.Message -match 'vba ui') 'vba dev refuses project while vba ui is active' }
         finally { Release-VbaSessionLock $uiModeLock }
+        Assert (Should-CloseVbaOnExit $true $true) 'stopping active vba dev closes managed Excel'
     } finally { Remove-VbaTemp $temp }
 }
 
