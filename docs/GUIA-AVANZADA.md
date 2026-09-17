@@ -51,7 +51,7 @@ Ventas/
 
 Abre `src` con tu editor o IA. Al guardar un archivo, su componente se actualiza en Excel, normalmente en alrededor de un segundo cuando Excel está disponible. Con autoguardado en el editor, basta editar. Mantén el comando ejecutándose. `Ctrl+C` detiene la vigilancia y deja Excel abierto. También puedes cerrar el libro desde Excel: el comando detecta el cierre y termina. Si Excel muestra una pregunta de guardado, respóndela normalmente; la herramienta espera mientras Excel está ocupado.
 
-`src` tiene prioridad para el código: sus cambios pendientes se importan al reiniciar, aunque Excel también haya cambiado. Mientras el proceso está encendido, los cambios de código hechos solamente en Excel se exportan a `src` al guardar el libro. Guardar archivos en `src` actualiza Excel. Si el mismo módulo cambia en ambos lados antes de sincronizar, gana `src`. Al iniciar el proceso se mantiene la prioridad de `src` para el código existente. Los componentes nuevos creados en Excel se extraen a `src`. Si eliminas un componente en Excel y guardas el libro, se elimina su archivo; si ese archivo tiene cambios locales pendientes, se conserva y vuelve a importarse a Excel. Los cambios en celdas se conservan; guardar una sincronización también guarda el resto del libro abierto.
+`src` tiene prioridad para el código: sus cambios pendientes se importan al reiniciar, aunque Excel también haya cambiado. Mientras el proceso está encendido, los cambios de código hechos solamente en Excel se exportan a `src` al guardar el libro. Guardar archivos en `src` actualiza Excel. Si el mismo módulo cambia en ambos lados antes de sincronizar, gana `src`. Al iniciar el proceso se mantiene la prioridad de `src` para el código existente. Los componentes nuevos creados en Excel se extraen a `src`. Si eliminas un componente en Excel y guardas el libro, se elimina su archivo; si ese archivo tiene cambios locales pendientes, se conserva y vuelve a importarse a Excel. Los cambios en celdas se conservan; guardar una sincronización también guarda el resto del libro abierto. Al pulsar `Ctrl+C`, la herramienta guarda y cierra el libro manejado; si abrió una instancia de Excel, también la cierra.
 
 ## Crear un proyecto nuevo
 
@@ -112,6 +112,35 @@ Eliminar el archivo de un módulo, clase o formulario elimina ese componente de 
 Al editar solamente código de un formulario, se conserva su diseño actual de Excel. Los cambios locales en `.frx` también se importan. Para extraer cambios hechos solamente en el diseñador visual de Excel, utiliza `Pull` explícito: los binarios exportados por Excel contienen bytes variables y no se usan para detectar conflictos del lado de Excel. Si editas el diseño en ambos lados, el `.frx` local modificado tiene prioridad.
 
 El sincronizador importa código; no sustituye al compilador ni al depurador de VBA. Ejecuta y prueba tus macros en Excel. Si Excel está ocupado, muestra el error y reintenta cuando vuelve a estar disponible.
+
+## Custom UI Ribbon
+
+Custom UI controla pestañas y botones Ribbon desde XML. No es código `.bas`, `.cls` ni `.frm`.
+
+Solo admite libros `.xlsm` que ya tengan Custom UI. Excel debe estar cerrado durante todo este modo:
+
+```powershell
+vba ui . -Once
+```
+
+La primera ejecución extrae las partes Ribbon existentes a `src\custom-ui\customUI.xml` y, si existe, `src\custom-ui\customUI14.xml`. Edita esos archivos UTF-8 en VS Code. Ejecuta el mismo comando nuevamente para aplicar XML local al libro. Antes de cambiarlo, se guarda copia completa en `.vba\backups`.
+
+Para vigilar XML mientras editas, usa:
+
+```powershell
+vba ui .
+```
+
+El libro sigue cerrado; cada guardado XML válido actualiza el `.xlsm`. Después abre Excel normalmente para ver Ribbon. La herramienta no abre Excel ni genera capturas.
+
+`vba dev .` y `vba ui .` son excluyentes. Si uno está activo, el otro se detiene sin modificar nada e indica en español que debes detener el primer comando con `Ctrl+C`.
+
+Errores habituales:
+
+- Libro abierto: ciérralo antes de ejecutar `vba ui`.
+- XML inválido o raíz distinta de `customUI`: corrige XML; libro no se reemplaza.
+- Libro sin Custom UI: primera versión no crea Ribbon desde cero.
+- `.xlsb`: usa `.xlsm`; formato binario no está soportado en este modo.
 
 ## Una sola sincronización
 

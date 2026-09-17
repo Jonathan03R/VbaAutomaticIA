@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('dev', 'new')]
+    [ValidateSet('dev', 'new', 'ui')]
     [string] $Command = 'dev',
     [Parameter(Position = 1)]
     [string] $Path = '.',
@@ -22,7 +22,11 @@ try {
     if ($Command -eq 'new') {
         $Path = New-VbaProject -Path $Path
     }
-    Start-VbaProject -Path $Path -Once:$Once
+    if ($Command -eq 'ui') {
+        Start-CustomUiProject -Path $Path -Once:$Once
+    } else {
+        Start-VbaProject -Path $Path -Once:$Once
+    }
 } catch {
     Write-Host ("ERROR: " + $_.Exception.Message) -ForegroundColor Red
     exit 1
