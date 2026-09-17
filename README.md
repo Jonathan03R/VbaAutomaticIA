@@ -1,81 +1,128 @@
 # VBA Dev
 
-Edita tus macros en VS Code. Al guardar el código, se actualiza en Excel.
+Edita macros y Ribbon Custom UI desde VS Code. Guarda archivo; herramienta sincroniza Excel.
 
-## 1. Instala
+## Antes de empezar
 
-Necesitas **Windows y Excel de escritorio**.
+Necesitas Windows y Excel escritorio. En Excel activa una vez:
 
-1. Descarga este repositorio: **Code > Download ZIP**.
-2. Extrae la carpeta, por ejemplo en `C:\Herramientas\VbaAutomaticIA`.
-3. Agrega esa carpeta al **Path** de las variables de entorno de tu usuario.
-4. Cierra y vuelve a abrir VS Code.
+```text
+Archivo → Opciones → Centro de confianza → Configuración de macros
+→ Confiar en acceso al modelo de objetos de proyectos de VBA
+```
 
-En Excel, activa:
+## Elige tu camino
 
-**Archivo > Opciones > Centro de confianza > Configuración del Centro de confianza > Configuración de macros > Confiar en el acceso al modelo de objetos de proyectos de VBA**.
+| Quiero... | Ejecuta |
+|---|---|
+| Editar macros de Excel existente | `vba dev .` |
+| Crear Excel nuevo | `vba new .` |
+| Editar pestañas, botones o iconos Ribbon | `vba ui .` |
+| Ejecutar una vez y terminar | agrega `-Once` |
 
-## 2. Usa tu Excel
+`.` significa carpeta actual.
 
-Pon tu archivo `.xlsm` o `.xlsb` en una carpeta. Abre esa carpeta en VS Code y ejecuta en la terminal:
+## Macros VBA
+
+Con libro `.xlsm` o `.xlsb` cerrado:
 
 ```powershell
 vba dev .
 ```
 
-Si el libro está en la carpeta principal, ciérralo antes de ejecutar el comando: la herramienta lo mueve a `excel`. Luego lo abre y crea `src` con tu código. **Edita sus archivos y guarda con Ctrl+S**: los cambios pasan a Excel.
-
-Tanto `new` como `dev` dejan este orden:
+Proyecto queda ordenado:
 
 ```text
-TuProyecto/
-├── excel/   Libro Excel
-├── src/     Código VBA
-└── .vba/    Configuración y respaldos
+MiProyecto/
+├─ excel/     libro Excel
+├─ src/       código que editas
+│  ├─ modules/    .bas
+│  ├─ classes/    .cls
+│  ├─ forms/      .frm y .frx
+│  └─ documents/  hojas y ThisWorkbook
+└─ .vba/      configuración y respaldos
 ```
 
-Si pide contraseña, escríbela en Excel. Si aparece la ventana de propiedades, ciérrala para continuar.
+```text
+vba dev . → editas src → Ctrl+S → Excel recibe cambio
+Excel guarda código → src recibe cambio
+```
 
-## 3. Comandos
-
-El punto `.` significa **la carpeta donde estás**.
-
-| Comando | Para qué sirve |
-|---|---|
-| `vba dev .` | Trabajar con un Excel existente y sincronizar mientras editas. |
-| `vba new .` | Crear Excel y código en una carpeta vacía, y empezar a sincronizar. |
-| `vba dev . -Once` | Aplicar los cambios pendientes una vez y terminar. |
-| `vba new . -Once` | Crear el proyecto y terminar sin seguir sincronizando. |
-| `vba ui .` | Editar Ribbon Custom UI con Excel cerrado. |
-| `vba ui . -Once` | Extraer o aplicar Custom UI una vez y terminar. |
-
-**Para detener:** pulsa `Ctrl+C` o cierra el libro de Excel. `Ctrl+C` guarda y cierra el libro manejado; si la herramienta abrió Excel, también cierra esa ventana.
-
-**Para continuar otro día:** ejecuta otra vez `vba dev .`.
-
-## Qué ocurre con tus cambios
-
-- Puedes editar con Excel cerrado. Al ejecutar `vba dev .`, se aplican los cambios pendientes.
-- Con el proceso encendido, guardar código en Excel actualiza `src`, y guardar en `src` actualiza Excel.
-- Al reiniciar, tiene prioridad `src`. Si el mismo módulo cambia en ambos lados antes de sincronizar, también gana `src`.
-- Crear o borrar un módulo en `src` lo crea o borra en Excel.
-- Puedes crear subcarpetas dentro de `modules`, `classes` o `forms`. Se conservan al sincronizar con Excel.
-- Puedes usar nombres descriptivos de archivo; `Attribute VB_Name` conserva identidad interna de Excel y macros.
-- Borrar un módulo en Excel y guardar elimina su archivo, salvo que tenga cambios locales pendientes: esos cambios ganan.
-- Conserva `.vba`: guarda el estado y los respaldos. Las hojas y `ThisWorkbook` no se borran eliminando su archivo.
-
-Para agregar módulos, trabajar con formularios o usar opciones avanzadas: [guía completa](docs/GUIA-AVANZADA.md).
-
-## Custom UI Ribbon
-
-`vba ui .` trabaja botones y pestañas Ribbon desde `src\custom-ui\customUI.xml`. Solo admite `.xlsm` que ya contengan Custom UI.
-
-Primera vez, con Excel cerrado:
+Si ambos cambian mismo archivo, `src` gana.
 
 ```powershell
-vba ui . -Once
+vba dev .          # abre y vigila Excel existente
+vba dev . -Once    # sincroniza una vez y termina
+vba new .          # crea libro nuevo y vigila
+vba new . -Once    # crea libro nuevo y termina
 ```
 
-Extrae XML. Edita texto, IDs o callbacks en VS Code. Para aplicar cambio, con Excel cerrado, ejecuta otra vez `vba ui . -Once`; o usa `vba ui .` para vigilar guardados. La herramienta guarda copia del libro en `.vba\backups` antes de modificarlo.
+`Ctrl+C` guarda y cierra libro manejado. Si herramienta abrió Excel, también cierra Excel.
 
-No ejecutes `vba dev .` y `vba ui .` a la vez. El segundo comando se detiene y muestra error en español. Para pasar de uno a otro, detén primero con `Ctrl+C`.
+## Ribbon: botones e iconos
+
+Excel debe estar **cerrado**.
+
+```powershell
+vba ui .
+```
+
+Primera vez extrae Ribbon a:
+
+```text
+src/custom-ui/
+├─ customUI.xml o customUI14.xml
+├─ _rels/                 relaciones de imágenes
+└─ images/                iconos y subcarpetas
+```
+
+```text
+vba ui . abierto
+→ editas XML, relaciones o imágenes
+→ guardas
+→ libro Excel se actualiza
+```
+
+También vigila cambios del libro:
+
+```text
+Excel → src/custom-ui
+```
+
+Crear, editar o eliminar XML, relaciones, imágenes y subcarpetas se sincroniza. Si ambos lados cambian mismo archivo, `src` gana.
+
+```powershell
+vba ui .          # sincroniza Ribbon y queda vigilando
+vba ui . -Once    # extrae o aplica Ribbon una vez y termina
+```
+
+Sin carpeta `src/custom-ui`, extrae desde Excel. Con carpeta existente, aplica `src` a Excel.
+
+## Reglas importantes
+
+```text
+vba dev .  = Excel abierto, macros
+vba ui .   = Excel cerrado, Ribbon e iconos
+```
+
+No ejecutes ambos a la vez. Detén primero con `Ctrl+C`.
+
+## Errores rápidos
+
+| Mensaje | Qué hacer |
+|---|---|
+| Más de un `.xlsm` / `.xlsb` | Indica archivo: `vba dev ".\Ventas.xlsm"` |
+| Excel abierto al usar `ui` | Cierra Excel completo |
+| No contiene Custom UI Ribbon | Libro aún no tiene Ribbon personalizado |
+| Proyecto VBA bloqueado | Escribe contraseña en diálogo Excel |
+| Acceso VBA denegado | Activa permiso de Centro de confianza |
+
+## Respaldos
+
+Antes de cambiar VBA o Ribbon, copia queda en:
+
+```text
+.vba/backups/
+```
+
+Guía técnica: [GUIA-AVANZADA.md](docs/GUIA-AVANZADA.md).
