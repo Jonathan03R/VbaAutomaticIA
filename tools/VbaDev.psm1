@@ -583,25 +583,38 @@ function Connect-VbaWorkbook([string] $Path, [switch] $Visible) {
     }
 }
 
+function Get-VbaWorkbookErrorStatus([Exception] $Failure) {
+    # Excel puede rechazar COM mientras muestra diálogos, procesa clics o guarda.
+    # Error de consulta no demuestra que el libro se haya cerrado: reintentar.
+    return 'Busy'
+}
+
+function Should-StopForClosedWorkbook([int] $MissingChecks) {
+    return $MissingChecks -ge 3
+}
+
 function Get-VbaWorkbookStatus($Connection, [string] $Path) {
     try {
-        foreach ($candidate in @($Connection.Excel.Workbooks)) {
-            if ($candidate.FullName -ieq $Path) {
-                if (-not $Connection.Excel.Ready) { return 'Busy' }
+        # Check readiness BEFORE touching Workbooks. PowerShell COM property
+        # access/enumeration can yield null instead of a catchable exception.
+        if ($Connection.Excel.Ready -ne $true) { return 'Busy' }
+        $books = $Connection.Excel.Workbooks
+        if ($null -eq $books) { return 'Busy' }
+        $count = $books.Count
+        if ($null -eq $count) { return 'Busy' }
+        for ($index = 1; $index -le $count; $index++) {
+            $candidate = $books.Item($index)
+            if ($null -eq $candidate) { return 'Busy' }
+            $candidatePath = $candidate.FullName
+            if ([string]::IsNullOrWhiteSpace($candidatePath)) { return 'Busy' }
+            if ($candidatePath -ieq $Path) {
                 return 'Open'
             }
         }
+        if ($Connection.Excel.Ready -ne $true -or $books.Count -ne $count) { return 'Busy' }
         return 'Closed'
     } catch {
-        $failure = $_.Exception
-        while ($failure) {
-            if ($failure.HResult.ToString('X8') -in '80010108', '800706BA', '800706BE', '800401FD') {
-                return 'Closed'
-            }
-            $failure = $failure.InnerException
-        }
-        # A save prompt, cell edit or another modal may temporarily reject COM.
-        return 'Busy'
+        return Get-VbaWorkbookErrorStatus $_.Exception
     }
 }
 
@@ -845,6 +858,7 @@ function Start-VbaProject([string] $Path, [switch] $Once, [string] $SourceRoot, 
     } | ConvertTo-Json
     $connection = $null
     $started = $false
+    $workbookClosed = $false
     $sessionLock = $null
     try {
         $sessionLock = Acquire-VbaSessionLock $meta 'dev'
@@ -862,14 +876,19 @@ function Start-VbaProject([string] $Path, [switch] $Once, [string] $SourceRoot, 
         $lastSource = Get-VbaFingerprint (Read-VbaState $statePath).Source
         $lastBookWrite = (Get-Item -LiteralPath $workbook).LastWriteTimeUtc.Ticks
         $lastError = ''
+        $missingWorkbookChecks = 0
         while ($true) {
             Start-Sleep -Milliseconds 500
             try {
                 $bookStatus = Get-VbaWorkbookStatus $connection $workbook
                 if ($bookStatus -eq 'Closed') {
+                    $missingWorkbookChecks++
+                    if (-not (Should-StopForClosedWorkbook $missingWorkbookChecks)) { continue }
+                    $workbookClosed = $true
                     Write-Host 'Libro cerrado. Sincronizacion detenida.' -ForegroundColor Yellow
                     break
                 }
+                $missingWorkbookChecks = 0
                 if ($bookStatus -eq 'Busy') { continue }
                 $currentSource = Get-VbaFingerprint (Get-VbaSnapshot $SourceRoot)
                 $currentBookWrite = (Get-Item -LiteralPath $workbook).LastWriteTimeUtc.Ticks
@@ -890,7 +909,7 @@ function Start-VbaProject([string] $Path, [switch] $Once, [string] $SourceRoot, 
             }
         }
     } finally {
-        Disconnect-VbaWorkbook $connection -Close:(Should-CloseVbaOnExit $Once $started)
+        Disconnect-VbaWorkbook $connection -Close:((-not $workbookClosed) -and (Should-CloseVbaOnExit $Once $started))
         Release-VbaSessionLock $sessionLock
     }
 }
