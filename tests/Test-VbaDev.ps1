@@ -67,6 +67,22 @@ End Function
     Assert ($plan.Count -eq 1 -and $plan[0].Direction -eq 'Pull') 'new Excel component is extracted'
     $plan = @(Get-VbaChangePlan @{} $base $state)
     Assert ($plan.Count -eq 1 -and $plan[0].Direction -eq 'Push') 'source deletion tracked'
+    $busyError = [Runtime.InteropServices.COMException]::new('Excel is busy', -2147417848)
+    Assert ((Get-VbaWorkbookErrorStatus $busyError) -eq 'Busy') 'transient Excel COM state does not stop watcher'
+    Assert (-not (Should-StopForClosedWorkbook 1)) 'one missing workbook check does not stop watcher'
+    Assert (Should-StopForClosedWorkbook 3) 'repeated missing workbook checks stop watcher'
+    $editing = @{ Excel = [pscustomobject]@{ Ready = $false; Workbooks = @() } }
+    Assert ((Get-VbaWorkbookStatus $editing 'C:\book.xlsm') -eq 'Busy') 'editing with empty workbook enumeration must not signal closure'
+    $unavailable = @{ Excel = [pscustomobject]@{ Ready = $true; Workbooks = $null } }
+    Assert ((Get-VbaWorkbookStatus $unavailable 'C:\book.xlsm') -eq 'Busy') 'unavailable workbook collection must not signal closure'
+    $closed = @{ Excel = [pscustomobject]@{ Ready = $true; Workbooks = @() } }
+    Assert ((Get-VbaWorkbookStatus $closed 'C:\book.xlsm') -eq 'Closed') 'responsive Excel with zero workbooks confirms closure'
+    $indexedBooks = [pscustomobject]@{ Count = 1; Path = 'C:\book.xlsm' }
+    $indexedBooks | Add-Member ScriptMethod Item { param($index) if ($index -ne 1) { throw 'Invalid index' }; return [pscustomobject]@{ FullName = $this.Path } }
+    $openBook = @{ Excel = [pscustomobject]@{ Ready = $true; Workbooks = $indexedBooks } }
+    Assert ((Get-VbaWorkbookStatus $openBook 'C:\book.xlsm') -eq 'Open') 'indexed collection finds open workbook'
+    $indexedBooks.Path = ''
+    Assert ((Get-VbaWorkbookStatus $openBook 'C:\book.xlsm') -eq 'Busy') 'unavailable workbook path is not closure'
     $temp = New-VbaTemp
     try {
         Write-VbaText (Join-Path $temp 'NombreLegible.bas') "Attribute VB_Name = `"NombreInterno`"`r`nOption Explicit"
