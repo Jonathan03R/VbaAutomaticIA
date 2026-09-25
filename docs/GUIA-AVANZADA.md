@@ -14,7 +14,7 @@ Herramienta de consola para editar VBA fuera de Excel. Recibe un libro existente
 vba dev .
 ```
 
-Para crear un proyecto en una carpeta vacía, ejecuta `vba new .`. No necesitas instalar Python ni Node.js. Conserva juntos `vba.cmd`, `vba.ps1` y la carpeta `tools`.
+Para crear un proyecto en una carpeta vacía, ejecuta `vba new .`. Crea el libro, las carpetas VBA y `src\custom-ui` con el Ribbon inicial **Excel negocios**, organizado en grupos de texto **VBA**, **Custom UI** y **Proyecto**, sin botones ni macros; luego abre Excel y comienza el flujo `dev` para sincronizar macros. No necesitas instalar Python ni Node.js. Conserva juntos `vba.cmd`, `vba.ps1` y la carpeta `tools`.
 
 Este repositorio distribuye código y documentación. Los libros Excel, recursos binarios de formularios, respaldos y el código extraído localmente en `src` quedan fuera del repositorio.
 
@@ -117,13 +117,17 @@ El sincronizador importa código; no sustituye al compilador ni al depurador de 
 
 Custom UI controla pestañas y botones Ribbon desde XML. No es código `.bas`, `.cls` ni `.frm`.
 
-Solo admite libros `.xlsm` que ya tengan Custom UI. Excel debe estar cerrado durante todo este modo:
+Admite libros `.xlsm`. Excel debe estar cerrado durante todo este modo:
 
 ```powershell
 vba ui . -Once
 ```
 
-La primera ejecución extrae las partes Ribbon existentes a `src\custom-ui\customUI.xml` y, si existe, `src\custom-ui\customUI14.xml`. Edita esos archivos UTF-8 en VS Code. Ejecuta el mismo comando nuevamente para aplicar XML local al libro. Antes de cambiarlo, se guarda copia completa en `.vba\backups`.
+La primera ejecución extrae las partes Ribbon existentes a `src\custom-ui\customUI.xml` y, si existe, `src\custom-ui\customUI14.xml`. Si libro aún no tiene Ribbon, crea pestaña **Excel negocios** con grupos de texto **VBA**, **Custom UI** y **Proyecto**, sin botones ni macros, en `src\custom-ui\customUI14.xml`; prepara carpetas `_rels` e `images` e inserta Ribbon en `.xlsm`. También actualiza la plantilla inicial anterior si conserva su estructura exacta. Antes de cambiar el libro, guarda copia completa en `.vba\backups`.
+
+Edita XML UTF-8 en VS Code. Ejecuta mismo comando nuevamente para aplicar XML local al libro.
+
+Excel carga el Ribbon al abrir el libro. Después de guardar XML, vuelve a abrir el `.xlsm` para ver el cambio.
 
 Para vigilar XML mientras editas, usa:
 
@@ -139,7 +143,7 @@ Errores habituales:
 
 - Libro abierto: ciérralo antes de ejecutar `vba ui`.
 - XML inválido o raíz distinta de `customUI`: corrige XML; libro no se reemplaza.
-- Libro sin Custom UI: primera versión no crea Ribbon desde cero.
+- Libro sin Ribbon: `vba ui` crea plantilla inicial **Excel negocios**.
 - `.xlsb`: usa `.xlsm`; formato binario no está soportado en este modo.
 
 ## Una sola sincronización

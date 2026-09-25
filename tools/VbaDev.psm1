@@ -1,4 +1,4 @@
-Set-StrictMode -Version 2
+﻿Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
 $script:Utf8 = New-Object Text.UTF8Encoding($false, $true)
 $script:Ansi = [Text.Encoding]::GetEncoding(
@@ -53,6 +53,77 @@ function Assert-CustomUiWorkbook([string] $Workbook) {
 function Import-CustomUiAssemblies {
     Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
     Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+}
+
+function Read-ZipEntryText($Archive, [string] $Name) {
+    $entry = $Archive.GetEntry($Name)
+    if (-not $entry) { return $null }
+    $input = $entry.Open()
+    try {
+        $reader = New-Object IO.StreamReader($input, [Text.Encoding]::UTF8, $true)
+        try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally { $input.Dispose() }
+}
+
+function Write-ZipEntryText($Archive, [string] $Name, [string] $Value) {
+    $previous = $Archive.GetEntry($Name)
+    if ($previous) { $previous.Delete() }
+    $entry = $Archive.CreateEntry($Name)
+    $output = $entry.Open()
+    try {
+        $bytes = $script:Utf8.GetBytes($Value)
+        $output.Write($bytes, 0, $bytes.Length)
+    } finally { $output.Dispose() }
+}
+
+function Register-CustomUiPart($Archive, [string] $Part) {
+    $relationshipName = '_rels/.rels'
+    $relationshipType = if ($Part -eq 'customUI/customUI14.xml') {
+        'http://schemas.microsoft.com/office/2007/relationships/ui/extensibility'
+    } else {
+        'http://schemas.microsoft.com/office/2006/relationships/ui/extensibility'
+    }
+    $relationshipsNs = 'http://schemas.openxmlformats.org/package/2006/relationships'
+    $relationshipsText = Read-ZipEntryText $Archive $relationshipName
+    if (-not $relationshipsText) { throw 'El libro no contiene _rels/.rels.' }
+    [xml]$relationships = $relationshipsText
+    $relationship = @($relationships.DocumentElement.ChildNodes | Where-Object {
+        $_.LocalName -eq 'Relationship' -and $_.GetAttribute('Target').TrimStart('/') -eq $Part
+    }) | Select-Object -First 1
+    if (-not $relationship) {
+        $usedIds = @($relationships.DocumentElement.ChildNodes | ForEach-Object { $_.GetAttribute('Id') })
+        $index = 1
+        do { $id = 'rIdCustomUI' + $index; $index++ } while ($usedIds -contains $id)
+        $relationship = $relationships.CreateElement('Relationship', $relationshipsNs)
+        $relationship.SetAttribute('Id', $id)
+        $relationship.SetAttribute('Type', $relationshipType)
+        $relationship.SetAttribute('Target', $Part)
+        $null = $relationships.DocumentElement.AppendChild($relationship)
+        Write-ZipEntryText $Archive $relationshipName $relationships.OuterXml
+    } elseif ($relationship.GetAttribute('Type') -ne $relationshipType) {
+        $relationship.SetAttribute('Type', $relationshipType)
+        Write-ZipEntryText $Archive $relationshipName $relationships.OuterXml
+    }
+
+    $contentTypesName = '[Content_Types].xml'
+    $contentTypesNs = 'http://schemas.openxmlformats.org/package/2006/content-types'
+    $contentTypesText = Read-ZipEntryText $Archive $contentTypesName
+    if (-not $contentTypesText) { throw 'El libro no contiene [Content_Types].xml.' }
+    [xml]$contentTypes = $contentTypesText
+    $partName = '/' + $Part
+    $override = @($contentTypes.DocumentElement.ChildNodes | Where-Object {
+        $_.LocalName -eq 'Override' -and $_.GetAttribute('PartName') -eq $partName
+    }) | Select-Object -First 1
+    if (-not $override) {
+        $override = $contentTypes.CreateElement('Override', $contentTypesNs)
+        $override.SetAttribute('PartName', $partName)
+        $override.SetAttribute('ContentType', 'application/xml')
+        $null = $contentTypes.DocumentElement.AppendChild($override)
+        Write-ZipEntryText $Archive $contentTypesName $contentTypes.OuterXml
+    } elseif ($override.GetAttribute('ContentType') -ne 'application/xml') {
+        $override.SetAttribute('ContentType', 'application/xml')
+        Write-ZipEntryText $Archive $contentTypesName $contentTypes.OuterXml
+    }
 }
 
 function Read-CustomUiXml([string] $Path) {
@@ -121,6 +192,7 @@ function Import-CustomUi([string] $Workbook, [string] $SourceRoot) {
                     $entry = $archive.CreateEntry($part)
                     $output = $entry.Open()
                     try { $output.Write($changes[$part], 0, $changes[$part].Length) } finally { $output.Dispose() }
+                    if ($part -in $script:CustomUiParts) { Register-CustomUiPart $archive $part }
                 }
             } finally { $archive.Dispose() }
         } finally { $stream.Dispose() }
@@ -188,6 +260,68 @@ function Save-CustomUiBackup([string] $Workbook, [string] $Meta) {
     Copy-Item -LiteralPath $Workbook -Destination (Join-Path $backups $name) -ErrorAction Stop
 }
 
+function New-CustomUiStarter([string] $SourceRoot) {
+    $folder = Join-Path $SourceRoot 'custom-ui'
+    $images = Join-Path $folder 'images'
+    $relationships = Join-Path $folder '_rels'
+    New-Item -ItemType Directory -Path $images -Force | Out-Null
+    New-Item -ItemType Directory -Path $relationships -Force | Out-Null
+    $xmlPath = Join-Path $folder 'customUI14.xml'
+    if (-not (Test-Path -LiteralPath $xmlPath)) {
+        $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' + "`n" +
+            '<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui"><ribbon><tabs><tab id="tabExcelNegocios" label="Excel negocios"><group id="groupVba" label="VBA"><labelControl id="labelVba" label="Macros y módulos" /></group><group id="groupCustomUi" label="Custom UI"><labelControl id="labelCustomUi" label="Pestañas y controles" /></group><group id="groupProject" label="Proyecto"><labelControl id="labelProject" label="Libro y archivos fuente" /></group></tab></tabs></ribbon></customUI>'
+        [IO.File]::WriteAllText($xmlPath, $xml, $script:Utf8)
+    }
+    return $folder
+}
+
+function Update-CustomUiStarter([string] $SourceRoot) {
+    $xmlPath = Join-Path (Join-Path $SourceRoot 'custom-ui') 'customUI14.xml'
+    if (-not (Test-Path -LiteralPath $xmlPath -PathType Leaf)) { return $false }
+    try { [xml]$xml = [IO.File]::ReadAllText($xmlPath, $script:Utf8) }
+    catch { return $false }
+    if ($xml.DocumentElement.LocalName -ne 'customUI' -or
+        $xml.DocumentElement.NamespaceURI -ne 'http://schemas.microsoft.com/office/2009/07/customui') { return $false }
+    $ribbon = $xml.DocumentElement.SelectSingleNode("*[local-name()='ribbon']")
+    if (-not $ribbon) { return $false }
+    $tabs = $ribbon.SelectSingleNode("*[local-name()='tabs']")
+    if (-not $tabs) { return $false }
+    $tabNodes = @($tabs.SelectNodes("./*[local-name()='tab']"))
+    if ($tabNodes.Count -ne 1) { return $false }
+    $tab = $tabNodes[0]
+    if ($tab.GetAttribute('id') -ne 'tabExcelNegocios' -or $tab.GetAttribute('label') -ne 'Excel negocios' -or $tab.Attributes.Count -ne 2) { return $false }
+    $groups = @($tab.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+    if ($groups.Count -gt 1) { return $false }
+    if ($groups.Count -eq 1) {
+        $group = $groups[0]
+        if ($group.LocalName -ne 'group' -or $group.GetAttribute('id') -ne 'groupExcelNegocios' -or $group.GetAttribute('label') -ne ' ' -or $group.Attributes.Count -ne 2) { return $false }
+        $controls = @($group.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+        if ($controls.Count -gt 1) { return $false }
+        if ($controls.Count -eq 1) {
+            $control = $controls[0]
+            if ($control.LocalName -ne 'labelControl' -or $control.GetAttribute('id') -ne 'labelExcelNegocios' -or $control.GetAttribute('label') -ne 'Excel negocios' -or $control.Attributes.Count -ne 2) { return $false }
+        }
+        $null = $tab.RemoveChild($group)
+    }
+    $starterGroups = @(
+        @{ Id = 'groupVba'; Label = 'VBA'; ControlId = 'labelVba'; ControlLabel = 'Macros y módulos' },
+        @{ Id = 'groupCustomUi'; Label = 'Custom UI'; ControlId = 'labelCustomUi'; ControlLabel = 'Pestañas y controles' },
+        @{ Id = 'groupProject'; Label = 'Proyecto'; ControlId = 'labelProject'; ControlLabel = 'Libro y archivos fuente' }
+    )
+    foreach ($starter in $starterGroups) {
+        $group = $xml.CreateElement('group', $xml.DocumentElement.NamespaceURI)
+        $group.SetAttribute('id', $starter.Id)
+        $group.SetAttribute('label', $starter.Label)
+        $label = $xml.CreateElement('labelControl', $xml.DocumentElement.NamespaceURI)
+        $label.SetAttribute('id', $starter.ControlId)
+        $label.SetAttribute('label', $starter.ControlLabel)
+        $null = $group.AppendChild($label)
+        $null = $tab.AppendChild($group)
+    }
+    [IO.File]::WriteAllText($xmlPath, $xml.OuterXml, $script:Utf8)
+    return $true
+}
+
 function Start-CustomUiProject([string] $Path, [switch] $Once) {
     $project = Get-CustomUiProjectPaths $Path
     New-Item -ItemType Directory -Path $project.Meta -Force | Out-Null
@@ -205,14 +339,30 @@ function Start-CustomUiProject([string] $Path, [switch] $Once) {
             $project.Workbook = Move-VbaWorkbookToExcel $project.Workbook $project.Root $configPath $layout
         }
         $folder = Join-Path $project.Source 'custom-ui'
-        if (-not (Test-Path -LiteralPath $folder -PathType Container)) {
-            Export-CustomUi $project.Workbook $project.Source
-            Write-Host "Custom UI extraído: $folder" -ForegroundColor Cyan
+        $hasCustomUiFiles = $false
+        if (Test-Path -LiteralPath $folder -PathType Container) {
+            $hasCustomUiFiles = @(Get-ChildItem -LiteralPath $folder -File -Recurse -ErrorAction SilentlyContinue).Count -gt 0
+        }
+        if (-not $hasCustomUiFiles) {
+            try {
+                Export-CustomUi $project.Workbook $project.Source
+                Write-Host "Custom UI extraído: $folder" -ForegroundColor Cyan
+            } catch {
+                if ($_.Exception.Message -notmatch 'El libro no contiene Custom UI Ribbon\.') { throw }
+                $folder = New-CustomUiStarter $project.Source
+                Save-CustomUiBackup $project.Workbook $project.Meta
+                Import-CustomUi $project.Workbook $project.Source
+                Write-Host "Ribbon inicial creado: $folder" -ForegroundColor Green
+            }
         } else {
+            if (Update-CustomUiStarter $project.Source) {
+                Write-Host 'Plantilla Excel negocios actualizada con grupos de desarrollo.' -ForegroundColor Cyan
+            }
             Save-CustomUiBackup $project.Workbook $project.Meta
             Import-CustomUi $project.Workbook $project.Source
             Write-Host "Libro actualizado desde Custom UI: $folder" -ForegroundColor Green
         }
+        Write-Host 'Abre de nuevo el libro en Excel para ver el Ribbon.' -ForegroundColor Yellow
         if ($Once) { return }
         Write-Host "Editando Custom UI: $folder`nGuarda XML para actualizar libro cerrado. Ctrl+C detiene vigilancia." -ForegroundColor Yellow
         $lastSource = Get-CustomUiFingerprint $project.Source
@@ -229,7 +379,7 @@ function Start-CustomUiProject([string] $Path, [switch] $Once) {
                     Import-CustomUi $project.Workbook $project.Source
                     $lastSource = Get-CustomUiFingerprint $project.Source
                     $lastBookWrite = (Get-Item -LiteralPath $project.Workbook).LastWriteTimeUtc.Ticks
-                    Write-Host 'Custom UI actualizado en libro.' -ForegroundColor Green
+                    Write-Host 'Custom UI actualizado en libro. Abre de nuevo Excel para ver el Ribbon.' -ForegroundColor Green
                 } elseif ($currentBookWrite -ne $lastBookWrite) {
                     Export-CustomUi $project.Workbook $project.Source
                     $lastSource = Get-CustomUiFingerprint $project.Source
@@ -474,6 +624,26 @@ function Import-VbaComponent($Project, [string] $Name, [string] $Root, $Entry) {
     } finally { Remove-VbaTemp $temp }
 }
 
+function Remove-VbaWorksheet($Book, [string] $CodeName) {
+    $sheet = @($Book.Worksheets) | Where-Object { $_.CodeName -ieq $CodeName } | Select-Object -First 1
+    if (-not $sheet) { throw "Document '$CodeName' is not a worksheet in this workbook." }
+    if ($Book.Worksheets.Count -le 1) { throw "Cannot delete the last worksheet '$CodeName'." }
+    if ($Book.ProtectStructure) { throw "Cannot delete worksheet '$CodeName': workbook structure is protected." }
+    $alerts = $Book.Application.DisplayAlerts
+    $visibility = $sheet.Visible
+    try {
+        $Book.Application.DisplayAlerts = $false
+        # Excel rejects Delete while a sheet is VeryHidden; keep it hidden from the UI.
+        if ($visibility -eq 2) { $sheet.Visible = 0 }
+        $sheet.Delete()
+    } catch {
+        try { $sheet.Visible = $visibility } catch { }
+        throw
+    } finally {
+        $Book.Application.DisplayAlerts = $alerts
+    }
+}
+
 function Wait-VbaProjectAccess($Project,
     [ValidateRange(1, 3600)] [int] $TimeoutSeconds = 300,
     [ValidateRange(10, 1000)] [int] $PollMilliseconds = 250) {
@@ -682,18 +852,28 @@ function Sync-VbaProject($Connection, [string] $SourceRoot, [string] $StatePath,
         $actions = @(Get-VbaChangePlan $sourceMap $bookMap $state -Bidirectional:$Bidirectional)
         $push = @($actions | Where-Object { $_.Direction -eq 'Push' })
         if ($push.Count -gt 0) {
-            # Validate all document deletions before changing any component.
+            # A removed tracked worksheet source deletes its matching Excel sheet.
+            # Workbook and other document types cannot be deleted this way.
+            $sheetsToDelete = @()
             foreach ($action in $push) {
                 $component = @($Connection.Project.VBComponents) | Where-Object { $_.Name -ieq $action.Name } | Select-Object -First 1
                 if ($component -and [int]$component.Type -eq 100 -and -not $sourceMap.ContainsKey($action.Name)) {
-                    throw "Cannot delete document '$($action.Name)'. Restore its file and clear its code instead."
+                    $sheet = @($Connection.Book.Worksheets) | Where-Object { $_.CodeName -ieq $action.Name } | Select-Object -First 1
+                    if (-not $sheet -or -not $state.Source.ContainsKey($action.Name)) {
+                        throw "Cannot delete document '$($action.Name)'. Only tracked worksheets can be deleted from src."
+                    }
+                    $sheetsToDelete += $action.Name
                 }
+            }
+            if ($Connection.Book.Worksheets.Count -le $sheetsToDelete.Count) {
+                throw 'Cannot delete all worksheets from the workbook.'
             }
             $backupRoot = Join-Path (Split-Path -Parent $StatePath) 'backups'
             New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
             $backup = Join-Path $backupRoot ((Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + [IO.Path]::GetExtension($Connection.Book.FullName))
             $Connection.Excel.EnableEvents = $false
             $Connection.Book.SaveCopyAs($backup)
+            $deletedSheets = @()
             try {
                 foreach ($action in $push) {
                     $name = $action.Name
@@ -705,15 +885,24 @@ function Sync-VbaProject($Connection, [string] $SourceRoot, [string] $StatePath,
                         $stagedBinary = [IO.Path]::ChangeExtension((Join-Path $sourceStage $sourceMap[$name].Path), '.frx')
                         if (Test-Path -LiteralPath $currentBinary) { Copy-Item -LiteralPath $currentBinary -Destination $stagedBinary -Force }
                     }
-                    Import-VbaComponent $Connection.Project $action.Name $sourceStage $sourceMap[$action.Name]
+                    if ($sheetsToDelete -contains $name) {
+                        Remove-VbaWorksheet $Connection.Book $name
+                        $deletedSheets += $name
+                    } else {
+                        Import-VbaComponent $Connection.Project $action.Name $sourceStage $sourceMap[$action.Name]
+                    }
                 }
                 $Connection.Book.Save()
                 if (-not $Connection.Book.Saved) { throw 'Excel did not save the workbook.' }
             } catch {
                 $failure = $_
                 foreach ($action in $push) {
+                    if ($deletedSheets -contains $action.Name) { continue }
                     try { Import-VbaComponent $Connection.Project $action.Name $stage $bookMap[$action.Name] }
                     catch { Write-Warning "Could not restore '$($action.Name)'. Backup: $backup" }
+                }
+                if ($deletedSheets.Count -gt 0) {
+                    Write-Warning "Deleted sheets cannot be restored in memory. Close without saving and use backup if needed: $backup"
                 }
                 throw "Sync failed: $($failure.Exception.Message). Previous VBA restored in memory where possible. Backup: $backup"
             }
@@ -767,6 +956,15 @@ function New-VbaProject([string] $Path) {
         } catch { throw 'Cannot create VBA module. Enable Trust access to the VBA project object model in Excel Trust Center.' }
         $target = Join-Path $root ('excel\' + (Split-Path -Leaf $root) + '.xlsm')
         $book.SaveAs($target, 52)
+        $book.Close($false)
+        [Runtime.InteropServices.Marshal]::ReleaseComObject($book) | Out-Null
+        $book = $null
+        $excel.Quit()
+        [Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
+        $excel = $null
+        $sourceRoot = Join-Path $root 'src'
+        $null = New-CustomUiStarter $sourceRoot
+        $null = Import-CustomUi $target $sourceRoot
         return $root
     } finally {
         if ($book) { $book.Close($false); [Runtime.InteropServices.Marshal]::ReleaseComObject($book) | Out-Null }
