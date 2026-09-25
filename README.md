@@ -53,9 +53,11 @@ Si ambos cambian mismo archivo, `src` gana.
 ```powershell
 vba dev .          # abre y vigila Excel existente
 vba dev . -Once    # sincroniza una vez y termina
-vba new .          # crea libro nuevo y vigila
+vba new .          # crea estructura, Ribbon inicial y abre Excel para dev
 vba new . -Once    # crea libro nuevo y termina
 ```
+
+`vba new .` se ejecuta en una carpeta vacía. Prepara `excel/`, `src/` con sus carpetas VBA y `src/custom-ui/` con XML inicial, `_rels/` e `images/`; agrega la pestaña **Excel negocios**, con grupos de texto VBA, Custom UI y Proyecto, y después inicia `dev` con Excel abierto.
 
 `Ctrl+C` guarda y cierra libro manejado. Si herramienta abrió Excel, también cierra Excel.
 
@@ -67,7 +69,9 @@ Excel debe estar **cerrado**.
 vba ui .
 ```
 
-Primera vez extrae Ribbon a:
+Guarda XML con `vba ui` activo; el libro se actualiza. Vuelve a abrirlo en Excel para ver el Ribbon.
+
+Primera vez, extrae Ribbon existente a:
 
 ```text
 src/custom-ui/
@@ -76,11 +80,13 @@ src/custom-ui/
 └─ images/                iconos y subcarpetas
 ```
 
+Si libro no tiene Ribbon, `vba ui` crea pestaña inicial **Excel negocios** con grupos de texto **VBA**, **Custom UI** y **Proyecto**, sin botones ni macros. También prepara `_rels/` e `images/` para ampliar el Ribbon.
+
 ```text
 vba ui . abierto
-→ editas XML, relaciones o imágenes
-→ guardas
-→ libro Excel se actualiza
+editas XML, relaciones o imágenes
+guardas
+libro Excel se actualiza
 ```
 
 También vigila cambios del libro:
@@ -96,7 +102,7 @@ vba ui .          # sincroniza Ribbon y queda vigilando
 vba ui . -Once    # extrae o aplica Ribbon una vez y termina
 ```
 
-Sin carpeta `src/custom-ui`, extrae desde Excel. Con carpeta existente, aplica `src` a Excel.
+Sin carpeta `src/custom-ui`, extrae Ribbon existente o crea plantilla inicial cuando libro no tenga Ribbon. Con carpeta existente, aplica `src` a Excel.
 
 ## Reglas importantes
 
