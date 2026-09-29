@@ -1,4 +1,4 @@
-﻿Set-StrictMode -Version 2
+Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
 $script:Utf8 = New-Object Text.UTF8Encoding($false, $true)
 $script:Ansi = [Text.Encoding]::GetEncoding(
@@ -815,7 +815,7 @@ function Disconnect-VbaWorkbook($Connection, [switch] $Close) {
     # Do not wait for COM finalizers: a pending Excel dialog can block them.
 }
 
-function Sync-VbaProject($Connection, [string] $SourceRoot, [string] $StatePath, [switch] $Flat,
+function Sync-VbaProject($Connection, [string] $SourceRoot, [string] $StatePath, [switch] $Flat, [bool] $Backups = $false,
     [ValidateSet('Auto', 'Push', 'Pull')] [string] $Direction = 'Auto', [switch] $Bidirectional) {
     $stage = New-VbaTemp
     $sourceStage = New-VbaTemp
@@ -868,11 +868,14 @@ function Sync-VbaProject($Connection, [string] $SourceRoot, [string] $StatePath,
             if ($Connection.Book.Worksheets.Count -le $sheetsToDelete.Count) {
                 throw 'Cannot delete all worksheets from the workbook.'
             }
-            $backupRoot = Join-Path (Split-Path -Parent $StatePath) 'backups'
-            New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
-            $backup = Join-Path $backupRoot ((Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + [IO.Path]::GetExtension($Connection.Book.FullName))
             $Connection.Excel.EnableEvents = $false
-            $Connection.Book.SaveCopyAs($backup)
+            $backup = $null
+            if ($Backups) {
+                $backupRoot = Join-Path (Split-Path -Parent $StatePath) 'backups'
+                New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
+                $backup = Join-Path $backupRoot ((Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + [IO.Path]::GetExtension($Connection.Book.FullName))
+                $Connection.Book.SaveCopyAs($backup)
+            }
             $deletedSheets = @()
             try {
                 foreach ($action in $push) {
@@ -899,12 +902,14 @@ function Sync-VbaProject($Connection, [string] $SourceRoot, [string] $StatePath,
                 foreach ($action in $push) {
                     if ($deletedSheets -contains $action.Name) { continue }
                     try { Import-VbaComponent $Connection.Project $action.Name $stage $bookMap[$action.Name] }
-                    catch { Write-Warning "Could not restore '$($action.Name)'. Backup: $backup" }
+                    catch { Write-Warning (if ($backup) { "Could not restore '$($action.Name)'. Backup: $backup" } else { "Could not restore '$($action.Name)' in memory." }) }
                 }
                 if ($deletedSheets.Count -gt 0) {
-                    Write-Warning "Deleted sheets cannot be restored in memory. Close without saving and use backup if needed: $backup"
+                    if ($backup) { Write-Warning "Deleted sheets cannot be restored in memory. Close without saving and use backup if needed: $backup" }
+                    else { Write-Warning 'Deleted sheets cannot be restored in memory. Backups are disabled; close without saving to undo this sync.' }
                 }
-                throw "Sync failed: $($failure.Exception.Message). Previous VBA restored in memory where possible. Backup: $backup"
+                $backupMessage = if ($backup) { " Backup: $backup" } else { ' Backups are disabled.' }
+                throw "Sync failed: $($failure.Exception.Message). Previous VBA restored in memory where possible.$backupMessage"
             }
             foreach ($action in $push) { Write-Host "Excel <- $($action.Name)" -ForegroundColor Green }
         }
@@ -1037,6 +1042,9 @@ function Start-VbaProject([string] $Path, [switch] $Once, [string] $SourceRoot, 
         }
         $SourceRoot = $configuredSource
         $Flat = [bool]$config.Flat
+        $Backups = if ($null -ne $config.Backups) { [bool]$config.Backups } else { $true }
+    } else {
+        $Backups = $true
     }
     if (-not $SourceRoot) { $SourceRoot = Join-Path $root 'src' }
     $SourceRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SourceRoot)
@@ -1062,11 +1070,12 @@ function Start-VbaProject([string] $Path, [switch] $Once, [string] $SourceRoot, 
         $sessionLock = Acquire-VbaSessionLock $meta 'dev'
         $workbook = Move-VbaWorkbookToExcel $workbook $root $configPath $layoutConfig
         $connection = Connect-VbaWorkbook $workbook -Visible:(-not $Once)
-        Sync-VbaProject $connection $SourceRoot $statePath -Flat:$Flat -Direction $Direction
+        Sync-VbaProject $connection $SourceRoot $statePath -Flat:$Flat -Backups:$Backups -Direction $Direction
         Write-VbaText $configPath (@{
             Workbook = $workbook.Substring($root.TrimEnd('\').Length + 1)
             Source = $SourceRoot.Substring($root.TrimEnd('\').Length + 1)
             Flat = [bool]$Flat
+            Backups = [bool]$Backups
         } | ConvertTo-Json)
         $started = $true
         if ($Once) { return }
