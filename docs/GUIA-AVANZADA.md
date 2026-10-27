@@ -45,8 +45,7 @@ Ventas/
 │   └── documents/     # .cls: hojas y ThisWorkbook
 └── .vba/
     ├── project.json
-    ├── state.json
-    └── backups/       # copia del libro antes de importar cambios
+    └── state.json
 ```
 
 Abre `src` con tu editor o IA. Al guardar un archivo, su componente se actualiza en Excel, normalmente en alrededor de un segundo cuando Excel está disponible. Con autoguardado en el editor, basta editar. Mantén el comando ejecutándose. `Ctrl+C` detiene la vigilancia y deja Excel abierto. También puedes cerrar el libro desde Excel: el comando detecta el cierre y termina. Si Excel muestra una pregunta de guardado, respóndela normalmente; la herramienta espera mientras Excel está ocupado.
@@ -92,7 +91,7 @@ La herramienta no cambia la configuración de seguridad de Office. Respeta la co
 
 ## Editar archivos
 
-Los archivos de texto de `src` usan **UTF-8**. Conserva `Attribute VB_Name`, el nombre del archivo y los `.frx` asociados a formularios. Excel utiliza la página de códigos ANSI del sistema para importar módulos y formularios; si un carácter no puede representarse, la operación falla y conserva un respaldo.
+Los archivos de texto de `src` usan **UTF-8**. Conserva `Attribute VB_Name`, el nombre del archivo y los `.frx` asociados a formularios. Excel utiliza la página de códigos ANSI del sistema para importar módulos y formularios; si un carácter no puede representarse, la operación falla y restaura el código anterior en memoria cuando puede.
 
 Puedes organizar `modules`, `classes` y `forms` con subcarpetas propias, por ejemplo `modules\\ventas\\Facturas.bas`. La sincronización conserva esa ubicación aunque edites el componente desde Excel. Puedes usar un nombre descriptivo de archivo distinto al componente interno: `ClienteDllSunat.bas` puede conservar `Attribute VB_Name = "OK_FROMDLL"`. El nombre interno debe seguir siendo único en todo `src`; Excel no muestra estas carpetas ni el nombre físico del archivo.
 
@@ -123,7 +122,7 @@ Admite libros `.xlsm`. Excel debe estar cerrado durante todo este modo:
 vba ui . -Once
 ```
 
-La primera ejecución extrae las partes Ribbon existentes a `src\custom-ui\customUI.xml` y, si existe, `src\custom-ui\customUI14.xml`. Si libro aún no tiene Ribbon, crea pestaña **Excel negocios** con grupos de texto **VBA**, **Custom UI** y **Proyecto**, sin botones ni macros, en `src\custom-ui\customUI14.xml`; prepara carpetas `_rels` e `images` e inserta Ribbon en `.xlsm`. También actualiza la plantilla inicial anterior si conserva su estructura exacta. Antes de cambiar el libro, guarda copia completa en `.vba\backups`.
+La primera ejecución extrae las partes Ribbon existentes a `src\custom-ui\customUI.xml` y, si existe, `src\custom-ui\customUI14.xml`. Si libro aún no tiene Ribbon, crea pestaña **Excel negocios** con grupos de texto **VBA**, **Custom UI** y **Proyecto**, sin botones ni macros, en `src\custom-ui\customUI14.xml`; prepara carpetas `_rels` e `images` e inserta Ribbon en `.xlsm`. También actualiza la plantilla inicial anterior si conserva su estructura exacta. La sincronización no crea respaldos automáticos.
 
 Edita XML UTF-8 en VS Code. Ejecuta mismo comando nuevamente para aplicar XML local al libro.
 
@@ -162,7 +161,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\vba.ps1 dev "C:\MisPro
 
 ## Prioridad del código y recuperación
 
-Puedes cerrar Excel, editar, crear o eliminar archivos de `src` y volver a ejecutar `dev .`: los cambios pendientes se aplican al libro. Conserva `.vba`, que registra el estado para detectar eliminaciones. Si cambió el código en ambos lados, gana `src`. Antes de modificar el libro se crea un respaldo.
+Puedes cerrar Excel, editar, crear o eliminar archivos de `src` y volver a ejecutar `dev .`: los cambios pendientes se aplican al libro. Conserva `.vba`, que registra el estado para detectar eliminaciones. Si cambió el código en ambos lados, gana `src`. La sincronización no crea respaldos automáticos.
 
 Para conservar intencionalmente cambios de código hechos en Excel, detén el comando y usa `Pull` explícito. Los comandos siguientes reemplazan la otra versión:
 
@@ -174,7 +173,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-Vba.ps1 -Wo
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-Vba.ps1 -Workbook "C:\MisProyectos\Ventas\Ventas.xlsm" -SourceRoot "C:\MisProyectos\Ventas\src" -Direction Pull
 ```
 
-Después reinicia `vba.cmd dev`. Los respaldos anteriores a cada importación quedan en `.vba\backups`; no se borran automáticamente. Si una importación falla, se intenta restaurar el código anterior en memoria y se informa la ubicación del respaldo.
+Después reinicia `vba.cmd dev`. Si una importación falla, se intenta restaurar el código anterior en memoria. Los respaldos automáticos están desactivados; conserva una copia manual o usa Git antes de cambios importantes.
 
 Cada proyecto usa un libro y una carpeta `src`. La extracción inicial no sobrescribe una carpeta de código que ya tenga archivos y carezca de estado de sincronización. Usa una carpeta nueva para tu libro existente, o elige explícitamente `Push`/`Pull` con el script anterior.
 
