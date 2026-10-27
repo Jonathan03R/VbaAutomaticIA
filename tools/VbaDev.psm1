@@ -253,13 +253,6 @@ function Get-CustomUiFingerprint([string] $SourceRoot) {
     }) -join ';')
 }
 
-function Save-CustomUiBackup([string] $Workbook, [string] $Meta) {
-    $backups = Join-Path $Meta 'backups'
-    New-Item -ItemType Directory -Path $backups -Force | Out-Null
-    $name = (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '-custom-ui-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.xlsm'
-    Copy-Item -LiteralPath $Workbook -Destination (Join-Path $backups $name) -ErrorAction Stop
-}
-
 function New-CustomUiStarter([string] $SourceRoot) {
     $folder = Join-Path $SourceRoot 'custom-ui'
     $images = Join-Path $folder 'images'
@@ -350,7 +343,6 @@ function Start-CustomUiProject([string] $Path, [switch] $Once) {
             } catch {
                 if ($_.Exception.Message -notmatch 'El libro no contiene Custom UI Ribbon\.') { throw }
                 $folder = New-CustomUiStarter $project.Source
-                Save-CustomUiBackup $project.Workbook $project.Meta
                 Import-CustomUi $project.Workbook $project.Source
                 Write-Host "Ribbon inicial creado: $folder" -ForegroundColor Green
             }
@@ -358,7 +350,6 @@ function Start-CustomUiProject([string] $Path, [switch] $Once) {
             if (Update-CustomUiStarter $project.Source) {
                 Write-Host 'Plantilla Excel negocios actualizada con grupos de desarrollo.' -ForegroundColor Cyan
             }
-            Save-CustomUiBackup $project.Workbook $project.Meta
             Import-CustomUi $project.Workbook $project.Source
             Write-Host "Libro actualizado desde Custom UI: $folder" -ForegroundColor Green
         }
@@ -367,26 +358,40 @@ function Start-CustomUiProject([string] $Path, [switch] $Once) {
         Write-Host "Editando Custom UI: $folder`nGuarda XML para actualizar libro cerrado. Ctrl+C detiene vigilancia." -ForegroundColor Yellow
         $lastSource = Get-CustomUiFingerprint $project.Source
         $lastBookWrite = (Get-Item -LiteralPath $project.Workbook).LastWriteTimeUtc.Ticks
+        $failedSource = $null
+        $failedBookWrite = $null
         while ($true) {
             Start-Sleep -Milliseconds 500
+            $currentSource = $null
+            $currentBookWrite = $null
             try {
                 $currentSource = Get-CustomUiFingerprint $project.Source
                 $currentBookWrite = (Get-Item -LiteralPath $project.Workbook).LastWriteTimeUtc.Ticks
+                if ($currentSource -eq $failedSource -and $currentBookWrite -eq $failedBookWrite) { continue }
                 if ($currentSource -ne $lastSource) {
                     Start-Sleep -Milliseconds 250
                     if ((Get-CustomUiFingerprint $project.Source) -ne $currentSource) { continue }
-                    Save-CustomUiBackup $project.Workbook $project.Meta
                     Import-CustomUi $project.Workbook $project.Source
                     $lastSource = Get-CustomUiFingerprint $project.Source
                     $lastBookWrite = (Get-Item -LiteralPath $project.Workbook).LastWriteTimeUtc.Ticks
+                    $failedSource = $null
+                    $failedBookWrite = $null
                     Write-Host 'Custom UI actualizado en libro. Abre de nuevo Excel para ver el Ribbon.' -ForegroundColor Green
                 } elseif ($currentBookWrite -ne $lastBookWrite) {
                     Export-CustomUi $project.Workbook $project.Source
                     $lastSource = Get-CustomUiFingerprint $project.Source
                     $lastBookWrite = (Get-Item -LiteralPath $project.Workbook).LastWriteTimeUtc.Ticks
+                    $failedSource = $null
+                    $failedBookWrite = $null
                     Write-Host 'Custom UI actualizado desde libro.' -ForegroundColor Cyan
                 }
-            } catch { Write-Warning $_.Exception.Message }
+            } catch {
+                Write-Warning $_.Exception.Message
+                if ($null -ne $currentSource -and $null -ne $currentBookWrite) {
+                    $failedSource = $currentSource
+                    $failedBookWrite = $currentBookWrite
+                }
+            }
         }
     } finally { Release-VbaSessionLock $lock }
 }
@@ -620,7 +625,11 @@ function Import-VbaComponent($Project, [string] $Name, [string] $Root, $Entry) {
         }
         if ($existing) { $Project.VBComponents.Remove($existing) }
         $imported = $Project.VBComponents.Import($importPath)
-        if ($imported.Name -cne $Name) { throw "Excel imported '$Name' as '$($imported.Name)'." }
+        if ($imported.Name -cne $Name) {
+            $importedName = $imported.Name
+            try { $Project.VBComponents.Remove($imported) } catch { }
+            throw "Excel imported '$Name' as '$importedName'; the renamed component was removed."
+        }
     } finally { Remove-VbaTemp $temp }
 }
 
@@ -793,10 +802,10 @@ function Should-CloseVbaOnExit([bool] $Once, [bool] $Started) {
     return $true
 }
 
-function Disconnect-VbaWorkbook($Connection, [switch] $Close) {
+function Disconnect-VbaWorkbook($Connection, [switch] $Close, [switch] $Save) {
     if (-not $Connection) { return }
     if ($Close) {
-        try { $Connection.Book.Close($true) }
+        try { $Connection.Book.Close([bool]$Save) }
         catch { Write-Warning 'No se pudo guardar y cerrar el libro; revisa Excel.' }
     }
     if ($Close -and $Connection.Owned) {
@@ -1042,9 +1051,9 @@ function Start-VbaProject([string] $Path, [switch] $Once, [string] $SourceRoot, 
         }
         $SourceRoot = $configuredSource
         $Flat = [bool]$config.Flat
-        $Backups = if ($null -ne $config.Backups) { [bool]$config.Backups } else { $true }
+        $Backups = $false
     } else {
-        $Backups = $true
+        $Backups = $false
     }
     if (-not $SourceRoot) { $SourceRoot = Join-Path $root 'src' }
     $SourceRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SourceRoot)
@@ -1083,6 +1092,8 @@ function Start-VbaProject([string] $Path, [switch] $Once, [string] $SourceRoot, 
         $lastSource = Get-VbaFingerprint (Read-VbaState $statePath).Source
         $lastBookWrite = (Get-Item -LiteralPath $workbook).LastWriteTimeUtc.Ticks
         $lastError = ''
+        $failedSource = $null
+        $failedBookWrite = $null
         $missingWorkbookChecks = 0
         while ($true) {
             Start-Sleep -Milliseconds 500
@@ -1099,6 +1110,7 @@ function Start-VbaProject([string] $Path, [switch] $Once, [string] $SourceRoot, 
                 if ($bookStatus -eq 'Busy') { continue }
                 $currentSource = Get-VbaFingerprint (Get-VbaSnapshot $SourceRoot)
                 $currentBookWrite = (Get-Item -LiteralPath $workbook).LastWriteTimeUtc.Ticks
+                if ($currentSource -eq $failedSource -and $currentBookWrite -eq $failedBookWrite) { continue }
                 if ($currentSource -ne $lastSource -or $currentBookWrite -ne $lastBookWrite) {
                     # Wait for the editor's save/rename sequence to settle.
                     Start-Sleep -Milliseconds 250
@@ -1108,15 +1120,22 @@ function Start-VbaProject([string] $Path, [switch] $Once, [string] $SourceRoot, 
                     $lastSource = Get-VbaFingerprint (Read-VbaState $statePath).Source
                     $lastBookWrite = (Get-Item -LiteralPath $workbook).LastWriteTimeUtc.Ticks
                     $lastError = ''
+                    $failedSource = $null
+                    $failedBookWrite = $null
                 }
             } catch {
                 $message = $_.Exception.Message
                 if ($message -ne $lastError) { Write-Warning $message; $lastError = $message }
+                if ($null -ne $currentSource -and $null -ne $currentBookWrite) {
+                    $failedSource = $currentSource
+                    $failedBookWrite = $currentBookWrite
+                }
                 # Transient COM errors or partial saves must not terminate the watcher.
             }
         }
     } finally {
-        Disconnect-VbaWorkbook $connection -Close:((-not $workbookClosed) -and (Should-CloseVbaOnExit $Once $started))
+        $closeOwnedBook = $connection -and $connection.Owned -and (-not $workbookClosed) -and (Should-CloseVbaOnExit $Once $started)
+        Disconnect-VbaWorkbook $connection -Close:$closeOwnedBook -Save:$started
         Release-VbaSessionLock $sessionLock
     }
 }

@@ -40,7 +40,7 @@ MiProyecto/
 │  ├─ classes/    .cls
 │  ├─ forms/      .frm y .frx
 │  └─ documents/  hojas y ThisWorkbook
-└─ .vba/      configuración y respaldos
+└─ .vba/      configuración y estado de sincronización
 ```
 
 ```text
@@ -125,10 +125,6 @@ No ejecutes ambos a la vez. Detén primero con `Ctrl+C`.
 
 ## Respaldos
 
-Antes de cambiar VBA o Ribbon, copia queda en:
-
-```text
-.vba/backups/
-```
+La sincronización automática de `vba dev` y `vba ui` no crea respaldos. Conserva tus cambios en Git o copia el libro manualmente antes de cambios importantes.
 
 Guía técnica: [GUIA-AVANZADA.md](docs/GUIA-AVANZADA.md).
