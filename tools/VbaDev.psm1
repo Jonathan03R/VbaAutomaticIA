@@ -5,6 +5,7 @@ $script:Ansi = [Text.Encoding]::GetEncoding(
     [Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage,
     (New-Object Text.EncoderExceptionFallback), (New-Object Text.DecoderExceptionFallback))
 $script:CustomUiParts = @('customUI/customUI.xml', 'customUI/customUI14.xml')
+. (Join-Path $PSScriptRoot 'VbaWorkbookIntegrity.ps1')
 
 function Acquire-VbaSessionLock([string] $MetaDirectory, [ValidateSet('dev', 'ui')] [string] $Mode) {
     New-Item -ItemType Directory -Path $MetaDirectory -Force | Out-Null
@@ -614,6 +615,15 @@ function Import-VbaComponent($Project, [string] $Name, [string] $Root, $Entry) {
         return
     }
     if ($Entry.Path -match '(^|[\\/])documents[\\/]') { throw "Document '$Name' does not exist in this workbook." }
+    if ($existing -and [int]$existing.Type -eq 1 -and [IO.Path]::GetExtension($path) -ieq '.bas') {
+        # Replace code in place. Removing/re-importing a standard module can leave
+        # Excel waiting on a VBE file dialog and lose the original module on failure.
+        $code = Get-VbaDocumentCode $text
+        $module = $existing.CodeModule
+        if ($module.CountOfLines -gt 0) { $module.DeleteLines(1, $module.CountOfLines) }
+        if ($code.Trim().Length -gt 0) { $module.AddFromString($code) }
+        return
+    }
     $temp = New-VbaTemp
     try {
         $importPath = Join-Path $temp ([IO.Path]::GetFileName($path))
@@ -719,12 +729,16 @@ function Connect-VbaWorkbook([string] $Path, [switch] $Visible) {
     $owned = $false
     $keepOpenOnError = $false
     try {
+        $missingDocuments = @(Get-VbaMissingDocumentModules $Path)
         try {
             $excel = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application')
             foreach ($candidate in @($excel.Workbooks)) {
                 if ($candidate.FullName -ieq $Path) { $book = $candidate; break }
             }
         } catch { $excel = $null }
+        if ($book -and $missingDocuments.Count) {
+            throw 'El libro abierto tiene modulos de hojas sin guardar. Guarda tus cambios, cierralo y ejecuta vba dev . para repararlo antes de iniciar sus macros.'
+        }
         if (-not $book) {
             if ($excel) { [Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null }
             $excel = New-Object -ComObject Excel.Application
@@ -732,18 +746,24 @@ function Connect-VbaWorkbook([string] $Path, [switch] $Visible) {
             # Display Excel BEFORE Open: Office requests opening/write passwords
             # natively when their optional arguments are omitted.
             $excel.Visible = $true
+            if ($missingDocuments.Count) {
+                Repair-VbaDocumentModules $excel $Path $missingDocuments
+            }
             $events = $excel.EnableEvents
             $security = $excel.AutomationSecurity
             $alerts = $excel.DisplayAlerts
             try {
+                # Workbook events can run incomplete sheet code before source sync.
+                # Ribbon callbacks are registered by Office independently of EnableEvents.
                 $excel.EnableEvents = $false
                 $excel.DisplayAlerts = $true
                 $excel.AutomationSecurity = 2 # Respect the user's Trust Center settings.
                 $book = $excel.Workbooks.Open($Path, 0, $false)
             } finally {
-                $excel.EnableEvents = $events
-                $excel.AutomationSecurity = $security
-                $excel.DisplayAlerts = $alerts
+                foreach ($setting in @(@('EnableEvents', $events), @('AutomationSecurity', $security), @('DisplayAlerts', $alerts))) {
+                    try { $excel.($setting[0]) = $setting[1] }
+                    catch { Write-Warning "No se pudo restaurar $($setting[0]) de Excel: $($_.Exception.Message)" }
+                }
             }
         }
         if ($book.ReadOnly) { throw 'Workbook is read-only or open in another Excel instance. Close that copy and retry.' }
@@ -911,7 +931,7 @@ function Sync-VbaProject($Connection, [string] $SourceRoot, [string] $StatePath,
                 foreach ($action in $push) {
                     if ($deletedSheets -contains $action.Name) { continue }
                     try { Import-VbaComponent $Connection.Project $action.Name $stage $bookMap[$action.Name] }
-                    catch { Write-Warning (if ($backup) { "Could not restore '$($action.Name)'. Backup: $backup" } else { "Could not restore '$($action.Name)' in memory." }) }
+                    catch { Write-Warning $(if ($backup) { "Could not restore '$($action.Name)'. Backup: $backup" } else { "Could not restore '$($action.Name)' in memory." }) }
                 }
                 if ($deletedSheets.Count -gt 0) {
                     if ($backup) { Write-Warning "Deleted sheets cannot be restored in memory. Close without saving and use backup if needed: $backup" }
@@ -941,7 +961,8 @@ function Sync-VbaProject($Connection, [string] $SourceRoot, [string] $StatePath,
         }
         Save-VbaState $StatePath $sourceMap $bookMap
     } finally {
-        $Connection.Excel.EnableEvents = $events
+        try { $Connection.Excel.EnableEvents = $events }
+        catch { Write-Warning "No se pudo restaurar EnableEvents de Excel: $($_.Exception.Message)" }
         Remove-VbaTemp $stage
         Remove-VbaTemp $sourceStage
     }

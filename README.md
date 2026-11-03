@@ -50,6 +50,19 @@ Excel guarda código → src recibe cambio
 
 Si ambos cambian mismo archivo, `src` gana.
 
+Antes de abrir un `.xlsm`, `vba dev .` comprueba que los nombres internos de sus
+hojas tengan un modulo guardado en el proyecto VBA. Si falta alguno, abre el libro
+con macros desactivadas, conserva el original en `excel/backup/`, deja que Excel
+registre los modulos y guarda. Verifica el archivo antes de volver a abrirlo con
+la configuracion habitual de macros y continuar la sincronizacion. Este respaldo
+de reparacion se crea incluso con `Backups: false`; los libros correctos no generan
+copias. No reemplaza los datos con una plantilla ni importa codigo de otro libro.
+
+Si el libro afectado ya esta abierto, guarda tus cambios y cierralo antes de volver
+a ejecutar `vba dev .`. Esta comprobacion cubre hojas sin `codeName` y modulos de
+documentos ausentes en archivos `.xlsm` sin cifrar; no es una reparacion general de archivos
+corruptos, libros cifrados o `.xlsb`.
+
 ```powershell
 vba dev .          # abre y vigila Excel existente
 vba dev . -Once    # sincroniza una vez y termina
