@@ -144,6 +144,7 @@ function Repair-VbaDocumentModules($Excel, [string] $Path, [string[]] $Missing) 
         # Saved=True. Force persistence even when no source code was edited.
         $saving = $true
         $book.Saved = $false
+        Complete-VbaProjectCompilation $Excel $project
         $book.Save()
         if (-not $book.Saved) { throw 'Excel no pudo guardar la reparacion.' }
         $book.Close($false)

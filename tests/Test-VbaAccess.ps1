@@ -70,6 +70,19 @@ $module = Get-Module VbaDev
     try { Get-VbaAccessibleProject $excel $denied }
     catch { $trustError = $_.Exception.Message -like '*Este permiso es distinto*' }
     Assert $trustError 'trust-center denial is distinguished from a VBA password'
+
+    function Start-VbaPasswordEntry($Excel, [string] $Password) {
+        $script:TestPasswordEntry = $Password
+        return @{ Password = $Password }
+    }
+    function Complete-VbaPasswordEntry($Entry) {
+        if ($Entry.Password -ne 'test-secret') { throw 'Incorrect forwarded password' }
+        $script:TestPasswordProject.Protection = 0
+    }
+    $script:TestPasswordProject = [pscustomobject]@{ Protection = 1; VBComponents = @('Main') }
+    $excel = New-FakeExcel $script:TestPasswordProject $false
+    Unlock-VbaProject $excel $script:TestPasswordProject -Clave 'test-secret'
+    Assert ($script:TestPasswordEntry -eq 'test-secret' -and $script:TestPasswordProject.Protection -eq 0) 'optional password reaches dialog worker and unlock resumes'
 }
 if ($Integration) {
     $excel = $null

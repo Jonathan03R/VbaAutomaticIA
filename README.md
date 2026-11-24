@@ -66,6 +66,8 @@ corruptos, libros cifrados o `.xlsb`.
 ```powershell
 vba dev .          # abre y vigila Excel existente
 vba dev . -Once    # sincroniza una vez y termina
+vba dev . -Clave "TU_CLAVE"  # introduce automaticamente la clave del proyecto VBA
+vba dev clave:TU_CLAVE .     # forma corta equivalente
 vba new .          # crea estructura, Ribbon inicial y abre Excel para dev
 vba new . -Once    # crea libro nuevo y termina
 ```
@@ -135,6 +137,10 @@ No ejecutes ambos a la vez. Detén primero con `Ctrl+C`.
 | No contiene Custom UI Ribbon | Libro aún no tiene Ribbon personalizado |
 | Proyecto VBA bloqueado | Escribe contraseña en diálogo Excel |
 | Acceso VBA denegado | Activa permiso de Centro de confianza |
+
+`-Clave` es opcional y solo sirve para la contraseña del **proyecto VBA**. Sin ella,
+Excel sigue pidiéndola en su ventana. La clave escrita en el comando queda en el
+historial de la consola; no se guarda en `.vba/`.
 
 ## Respaldos
 

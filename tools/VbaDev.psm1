@@ -684,7 +684,37 @@ function Wait-VbaProjectAccess($Project,
     throw "Se agoto la espera de $TimeoutSeconds segundos para acceder al VBA. Excel permanece abierto. Termina el desbloqueo, cierra sus cuadros de dialogo y vuelve a ejecutar el comando."
 }
 
-function Unlock-VbaProject($Excel, $Project, [int] $TimeoutSeconds = 300) {
+function Start-VbaPasswordEntry($Excel, [string] $Password) {
+    $runspace = [runspacefactory]::CreateRunspace()
+    $runspace.ApartmentState = 'STA'
+    $runspace.Open()
+    $worker = [powershell]::Create()
+    $worker.Runspace = $runspace
+    try {
+        $script = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Enter-VbaPassword.ps1'))
+        $null = $worker.AddScript($script).AddArgument([long]$Excel.Hwnd).AddArgument($Password)
+        return @{ Worker = $worker; Runspace = $runspace; Handle = $worker.BeginInvoke() }
+    } catch {
+        $worker.Dispose()
+        $runspace.Dispose()
+        throw
+    }
+}
+
+function Complete-VbaPasswordEntry($Entry) {
+    if (-not $Entry) { return }
+    try {
+        $null = $Entry.Worker.EndInvoke($Entry.Handle)
+        if ($Entry.Worker.Streams.Error.Count) {
+            throw $Entry.Worker.Streams.Error[0].Exception
+        }
+    } finally {
+        $Entry.Worker.Dispose()
+        $Entry.Runspace.Dispose()
+    }
+}
+
+function Unlock-VbaProject($Excel, $Project, [int] $TimeoutSeconds = 300, [string] $Clave) {
     if ([int]$Project.Protection -eq 0) { return }
     $vbe = $Excel.VBE
     $wasVisible = $vbe.MainWindow.Visible
@@ -697,17 +727,32 @@ function Unlock-VbaProject($Excel, $Project, [int] $TimeoutSeconds = 300) {
     if (-not $command -or -not $command.Enabled) {
         throw 'No se pudo abrir el dialogo VBA. En Excel pulsa Alt+F11, abre tu proyecto, introduce su contrasena y vuelve a ejecutar el comando.'
     }
-    Write-Host 'Proyecto VBA protegido. Introduce su contrasena en la ventana de Excel.' -ForegroundColor Yellow
-    Write-Host 'Si aparecen las propiedades del proyecto, cierra ese cuadro para continuar.' -ForegroundColor Yellow
+    if ([string]::IsNullOrEmpty($Clave)) {
+        Write-Host 'Proyecto VBA protegido. Introduce su contrasena en la ventana de Excel.' -ForegroundColor Yellow
+        Write-Host 'Si aparecen las propiedades del proyecto, cierra ese cuadro para continuar.' -ForegroundColor Yellow
+    } else {
+        Write-Host 'Proyecto VBA protegido. Introduciendo clave proporcionada en Excel.' -ForegroundColor Yellow
+    }
     Write-Host 'Esperando acceso al codigo. Si cancelas en Excel, pulsa Ctrl+C aqui para detener la espera.' -ForegroundColor Yellow
-    $command.Execute()
+    $entry = $null
+    try {
+        if (-not [string]::IsNullOrEmpty($Clave)) { $entry = Start-VbaPasswordEntry $Excel $Clave }
+        $command.Execute()
+        Complete-VbaPasswordEntry $entry
+        $entry = $null
+    } finally {
+        if ($entry) {
+            $entry.Worker.Dispose()
+            $entry.Runspace.Dispose()
+        }
+    }
     # Execute may return while the password dialog is still open.
     Wait-VbaProjectAccess $Project -TimeoutSeconds $TimeoutSeconds
     $vbe.MainWindow.Visible = $wasVisible
     Write-Host 'Proyecto VBA desbloqueado. Continuando sincronizacion.' -ForegroundColor Green
 }
 
-function Get-VbaAccessibleProject($Excel, $Book) {
+function Get-VbaAccessibleProject($Excel, $Book, [string] $Clave) {
     try {
         $project = $Book.VBProject
         $null = $project.Protection
@@ -716,14 +761,14 @@ function Get-VbaAccessibleProject($Excel, $Book) {
     }
     if ([int]$project.Protection -ne 0) {
         $Book.Activate()
-        Unlock-VbaProject $Excel $project
+        Unlock-VbaProject $Excel $project -Clave $Clave
     }
     try { $null = $project.VBComponents.Count }
     catch { throw 'No se pudieron leer los modulos VBA. Comprueba que el proyecto este desbloqueado y que Excel permita acceder al modelo de objetos VBA.' }
     return $project
 }
 
-function Connect-VbaWorkbook([string] $Path, [switch] $Visible) {
+function Connect-VbaWorkbook([string] $Path, [switch] $Visible, [string] $Clave) {
     $excel = $null
     $book = $null
     $owned = $false
@@ -768,7 +813,7 @@ function Connect-VbaWorkbook([string] $Path, [switch] $Visible) {
         }
         if ($book.ReadOnly) { throw 'Workbook is read-only or open in another Excel instance. Close that copy and retry.' }
         $keepOpenOnError = $true
-        $project = Get-VbaAccessibleProject $excel $book
+        $project = Get-VbaAccessibleProject $excel $book -Clave $Clave
         if ($Visible) { $excel.Visible = $true }
         elseif ($owned) { $excel.Visible = $false }
         return @{ Excel = $excel; Book = $book; Project = $project; Owned = $owned }
@@ -842,6 +887,28 @@ function Disconnect-VbaWorkbook($Connection, [switch] $Close, [switch] $Save) {
     }
     [GC]::Collect()
     # Do not wait for COM finalizers: a pending Excel dialog can block them.
+}
+
+function Complete-VbaProjectCompilation($Excel, $Project) {
+    # Persist valid compiled VBA and regenerated form registrations, not just
+    # source text. Otherwise a saved book can fail when reopened outside dev.
+    if ([int]$Project.Mode -ne 2) { throw 'Deten la ejecucion VBA antes de sincronizar el libro.' }
+    $component = @($Project.VBComponents) | Where-Object { $_.CodeModule.CountOfLines -gt 0 } | Select-Object -First 1
+    if (-not $component) { return }
+    $vbe = $Excel.VBE
+    $visible = $vbe.MainWindow.Visible
+    $previousPane = $vbe.ActiveCodePane
+    try {
+        # Show selects this project for the native Compile command.
+        $component.CodeModule.CodePane.Show()
+        $compile = $vbe.CommandBars.FindControl(1, 578)
+        if (-not $compile) { throw 'Excel no ofrece el comando Compilar VBAProject.' }
+        if ($compile.Enabled) { $compile.Execute() }
+        if ($compile.Enabled) { throw 'La compilacion VBA no termino. Revisa el error en el editor; no se guardo la sincronizacion.' }
+    } finally {
+        if ($previousPane) { try { $previousPane.Show() } catch { } }
+        $vbe.MainWindow.Visible = $visible
+    }
 }
 
 function Sync-VbaProject($Connection, [string] $SourceRoot, [string] $StatePath, [switch] $Flat, [bool] $Backups = $false,
@@ -924,6 +991,7 @@ function Sync-VbaProject($Connection, [string] $SourceRoot, [string] $StatePath,
                         Import-VbaComponent $Connection.Project $action.Name $sourceStage $sourceMap[$action.Name]
                     }
                 }
+                Complete-VbaProjectCompilation $Connection.Excel $Connection.Project
                 $Connection.Book.Save()
                 if (-not $Connection.Book.Saved) { throw 'Excel did not save the workbook.' }
             } catch {
@@ -1034,7 +1102,7 @@ function Move-VbaWorkbookToExcel([string] $Workbook, [string] $Root, [string] $C
 }
 
 function Start-VbaProject([string] $Path, [switch] $Once, [string] $SourceRoot, [switch] $Flat,
-    [ValidateSet('Auto', 'Push', 'Pull')] [string] $Direction = 'Auto') {
+    [ValidateSet('Auto', 'Push', 'Pull')] [string] $Direction = 'Auto', [string] $Clave) {
     $pathInfo = Get-Item -LiteralPath $Path
     if ($pathInfo.PSIsContainer) {
         $root = $pathInfo.FullName
@@ -1099,7 +1167,7 @@ function Start-VbaProject([string] $Path, [switch] $Once, [string] $SourceRoot, 
     try {
         $sessionLock = Acquire-VbaSessionLock $meta 'dev'
         $workbook = Move-VbaWorkbookToExcel $workbook $root $configPath $layoutConfig
-        $connection = Connect-VbaWorkbook $workbook -Visible:(-not $Once)
+        $connection = Connect-VbaWorkbook $workbook -Visible:(-not $Once) -Clave $Clave
         Sync-VbaProject $connection $SourceRoot $statePath -Flat:$Flat -Backups:$Backups -Direction $Direction
         Write-VbaText $configPath (@{
             Workbook = $workbook.Substring($root.TrimEnd('\').Length + 1)
