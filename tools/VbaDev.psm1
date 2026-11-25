@@ -611,7 +611,7 @@ function Import-VbaComponent($Project, [string] $Name, [string] $Root, $Entry) {
         $code = Get-VbaDocumentCode $text
         $module = $existing.CodeModule
         if ($module.CountOfLines -gt 0) { $module.DeleteLines(1, $module.CountOfLines) }
-        if ($code.Trim().Length -gt 0) { $module.AddFromString($code) }
+        if ($code.Trim().Length -gt 0) { $module.InsertLines(1, $code) }
         return
     }
     if ($Entry.Path -match '(^|[\\/])documents[\\/]') { throw "Document '$Name' does not exist in this workbook." }
@@ -621,7 +621,9 @@ function Import-VbaComponent($Project, [string] $Name, [string] $Root, $Entry) {
         $code = Get-VbaDocumentCode $text
         $module = $existing.CodeModule
         if ($module.CountOfLines -gt 0) { $module.DeleteLines(1, $module.CountOfLines) }
-        if ($code.Trim().Length -gt 0) { $module.AddFromString($code) }
+        # AddFromString can append a stray () when code contains continued
+        # Declare/Alias statements. InsertLines preserves the supplied text.
+        if ($code.Trim().Length -gt 0) { $module.InsertLines(1, $code) }
         return
     }
     $temp = New-VbaTemp
@@ -904,7 +906,22 @@ function Complete-VbaProjectCompilation($Excel, $Project) {
         $compile = $vbe.CommandBars.FindControl(1, 578)
         if (-not $compile) { throw 'Excel no ofrece el comando Compilar VBAProject.' }
         if ($compile.Enabled) { $compile.Execute() }
-        if ($compile.Enabled) { throw 'La compilacion VBA no termino. Revisa el error en el editor; no se guardo la sincronizacion.' }
+        if ($compile.Enabled) {
+            $location = ''
+            try {
+                $errorPane = $vbe.ActiveCodePane
+                if ($errorPane) {
+                    $startLine = 0; $startColumn = 0; $endLine = 0; $endColumn = 0
+                    $errorPane.GetSelection([ref] $startLine, [ref] $startColumn, [ref] $endLine, [ref] $endColumn)
+                    if ($startLine -gt 0) {
+                        $moduleName = $errorPane.CodeModule.Parent.Name
+                        $sourceLine = $errorPane.CodeModule.Lines($startLine, 1).Trim()
+                        $location = " Excel senalo ${moduleName}:${startLine}: $sourceLine"
+                    }
+                }
+            } catch { } # VBE may not expose a selection for every compile failure.
+            throw "La compilacion VBA no termino.$location Revisa el error en el editor; no se guardo la sincronizacion."
+        }
     } finally {
         if ($previousPane) { try { $previousPane.Show() } catch { } }
         $vbe.MainWindow.Visible = $visible
